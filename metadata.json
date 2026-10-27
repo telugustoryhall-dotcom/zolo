@@ -1,0 +1,10 @@
+{
+  "name": "ZOLO Chat",
+  "description": "A feature-packed messaging experience with live simulated conversations, voice notes, media sharing, calls, and status updates.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "notifications"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
