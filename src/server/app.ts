@@ -2079,6 +2079,14 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   );
 
+  app.use('/api', (req: Request, res: Response) => {
+    const requestPath = req.originalUrl.split('?')[0];
+    res.status(404).json({
+      code: 'API_NOT_FOUND',
+      error: `API endpoint not found: ${req.method} ${requestPath}`,
+    });
+  });
+
   // Start background message scheduler runner
   startSchedulerRunner();
 

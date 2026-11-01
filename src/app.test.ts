@@ -15,4 +15,13 @@ describe('ZOLO Backend API Health', () => {
     const res = await request(app).get('/api/nonexistent');
     expect(res.status).toBe(404);
   });
+
+  it('unknown API methods return a JSON 404 with the request path', async () => {
+    const res = await request(app).post('/api/nonexistent');
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({
+      code: 'API_NOT_FOUND',
+      error: 'API endpoint not found: POST /api/nonexistent',
+    });
+  });
 });

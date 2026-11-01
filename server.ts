@@ -28,21 +28,24 @@ async function startServer() {
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     const publicPath = path.resolve(__dirname, 'public');
+    const indexPath = path.join(distPath, 'index.html');
+
+    if (!fs.existsSync(indexPath)) {
+      throw new Error(`Production frontend build not found at ${indexPath}. Run npm run build before starting.`);
+    }
 
     if (fs.existsSync(publicPath)) {
       app.use(express.static(publicPath, { maxAge: '7d' }));
     }
 
-    if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath, { index: false }));
-      app.get('*', (req: Request, res: Response) => {
-        if (req.path.startsWith('/api/')) {
-          res.status(404).json({ error: 'API endpoint not found.' });
-          return;
-        }
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
-    }
+    app.use(express.static(distPath, { index: false }));
+    app.get('*', (req: Request, res: Response) => {
+      if (req.path.startsWith('/api/')) {
+        res.status(404).json({ error: 'API endpoint not found.' });
+        return;
+      }
+      res.sendFile(indexPath);
+    });
   }
 
   httpServer.listen(port, '0.0.0.0', () => {

@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+data/zolo_local.db
+data/zolo_local.db-shm
+data/zolo_local.db-wal

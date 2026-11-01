@@ -86,13 +86,15 @@ async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
   if (!response.ok) {
+    const method = (init.method || 'GET').toUpperCase();
+    const requestPath = url.split('?')[0];
     throw new AuthApiClientError({
       status: response.status,
       code: typeof data.code === 'string' ? data.code : undefined,
       error:
         typeof data.error === 'string'
           ? data.error
-          : `Request failed (HTTP ${response.status}).`,
+          : `Request failed (HTTP ${response.status}) for ${method} ${requestPath}.`,
       phoneNormalized:
         typeof data.phoneNormalized === 'string' ? data.phoneNormalized : undefined,
     });
