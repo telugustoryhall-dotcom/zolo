@@ -1,0 +1,6 @@
+{
+  "name": "ZOLO — Real-Time Messaging & Calling",
+  "description": "WhatsApp-style private and group real-time messaging, voice and video calling powered by WebRTC and Supabase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

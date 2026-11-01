@@ -1,0 +1,914 @@
+# ZOLO MASTER ENGINEERING PROMPT — COMPLETE EXISTING APP UPGRADE, REAL SUPABASE DATABASE, REAL-TIME FEATURES, AND FULL FUNCTIONALITY
+
+## ROLE
+
+Act as a principal full-stack engineer, senior React/TypeScript developer, Supabase database architect, PostgreSQL specialist, real-time systems engineer, WebRTC engineer, AI integration engineer, multiplayer game developer, application security engineer, and QA automation engineer.
+
+Your mission is to transform my **existing ZOLO web application** into a reliable, fully integrated messaging, AI, collaboration, calling, and gaming platform.
+
+This is an existing project. You must upgrade the actual source code, database integration, backend services, and user interface. Do not create a new project or a disconnected demonstration.
+
+**Primary objective: Every visible option must perform its intended action, every data-driven feature must use the correct persistent backend, and all existing functionality must be preserved.**
+
+---
+
+# PART 1 — NON-NEGOTIABLE PROJECT PRESERVATION
+
+Before doing anything, inspect the complete existing project.
+
+Identify:
+
+- Frontend framework and application entry points.
+- Existing routes, layouts, pages, and navigation.
+- React components, hooks, contexts, and state management.
+- Existing authentication and account creation.
+- Existing profile and contact systems.
+- Existing direct and group messaging.
+- Existing voice and video calls.
+- Existing media upload and download logic.
+- Existing Supabase client and configuration.
+- Existing PostgreSQL schema, migrations, indexes, triggers, and functions.
+- Existing row-level security policies.
+- Existing realtime subscriptions.
+- Existing storage buckets and storage policies.
+- Existing environment variables and API integrations.
+- Existing deployment and build configuration.
+- Existing tests and known errors.
+
+## Preservation rules
+
+1. Do not rebuild ZOLO from scratch.
+2. Do not replace the application with a starter template.
+3. Do not remove existing features, pages, routes, components, or working functionality.
+4. Do not reset, drop, truncate, or recreate the existing Supabase database.
+5. Do not delete existing user accounts, profiles, conversations, messages, attachments, or other user records.
+6. Do not replace the existing Supabase project with a new one.
+7. Do not create a second authentication system or a duplicate messaging backend.
+8. Do not unnecessarily rename existing tables, columns, routes, functions, or environment variables.
+9. Do not overwrite user changes that already exist in the working project.
+10. Prefer small, backward-compatible modifications and additive database migrations.
+11. Reuse existing components and services when appropriate.
+12. Preserve the existing ZOLO branding, design, and navigation while integrating new features consistently.
+
+If a requested feature already exists, inspect its implementation, test it, and repair it if necessary instead of creating a duplicate.
+
+If an existing component is broken, fix the underlying problem without removing unrelated functionality.
+
+---
+
+# PART 2 — IMPLEMENTATION RULES
+
+These rules apply to every feature in this prompt.
+
+## Rule A: Real functionality only
+
+Every button, menu item, icon, toggle, form, modal, filter, tab, and action must work.
+
+Examples:
+
+- A Save button must persist the intended data.
+- A Delete button must perform an authorized deletion or soft deletion according to the feature's rules.
+- A Search button must return real search results.
+- A Send button must send a real message.
+- A Retry button must retry the relevant failed operation.
+- A Theme toggle must change the interface and persist the selected preference.
+- A Game button must launch an actually playable game.
+- A Call button must initiate the real calling flow.
+- A Device Revocation button must revoke the appropriate server-side session.
+- A scheduled-message action must create a real scheduled job.
+
+Do not use placeholder handlers, empty callbacks, hardcoded results, fake loading states, simulated database success, or frontend-only persistence for features that require server-side data.
+
+## Rule B: Complete the entire data flow
+
+For every feature, implement and verify:
+
+**User interface → validation → application service → authentication → authorization → database or external service → result handling → UI update.**
+
+For realtime features, also implement:
+
+**Database change or signaling event → authorized subscription → correct client update → reconnect and cleanup handling.**
+
+Do not consider a feature complete merely because its UI looks correct.
+
+## Rule C: Work with the actual project
+
+Do not invent file paths, database tables, existing APIs, environment variables, or SDK methods.
+
+Inspect the source files before editing them.
+
+Use the existing framework and dependency versions unless a necessary change is justified.
+
+If a dependency is missing, install or configure it only when the environment supports that operation.
+
+If access to the repository, database, deployment environment, or external provider is missing, clearly identify the limitation and implement the portions that can genuinely be completed.
+
+## Rule D: No false completion claims
+
+Never report a feature as fully working unless the relevant implementation and tests support that claim.
+
+Distinguish between:
+
+- Implemented.
+- Tested successfully.
+- Partially implemented.
+- Awaiting credentials or configuration.
+- Blocked by external infrastructure.
+- Not yet tested.
+
+---
+
+# PART 3 — SUPABASE MUST WORK CORRECTLY
+
+Supabase integration is one of the highest priorities.
+
+Do not treat Supabase as an optional mock backend. Connect the existing ZOLO application to its actual configured Supabase project and verify the complete data flow.
+
+## 3.1 Supabase configuration
+
+Inspect the existing configuration and reuse it.
+
+For a Vite application, check whether the project already uses environment variables such as:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+Use the appropriate existing configuration for the actual framework.
+
+Use the current publishable key where appropriate, or the existing compatible public client key. Never expose a Supabase service-role key or secret key in browser code.
+
+Requirements:
+
+- Validate configuration during initialization.
+- Display actionable configuration errors.
+- Handle missing environment variables gracefully.
+- Use one appropriately configured client instance.
+- Avoid creating duplicate clients and subscriptions unnecessarily.
+- Preserve existing authentication sessions.
+- Never hardcode private credentials.
+- Do not invent keys or pretend that an unconfigured backend is connected.
+
+If configuration is missing, identify the exact variables required and where they must be configured.
+
+## 3.2 Existing database inspection
+
+Before creating tables, inspect the existing schema.
+
+Determine:
+
+- Which tables already store users and profiles.
+- Which tables store direct and group conversations.
+- How message ownership and conversation membership work.
+- How group membership and roles are represented.
+- How attachments and media are stored.
+- Which tables already have realtime enabled.
+- Which tables already have RLS policies.
+- Which indexes, triggers, and database functions already exist.
+
+Reuse equivalent existing structures.
+
+Never create duplicate tables just because a suggested name differs from the existing schema.
+
+## 3.3 Safe database migrations
+
+For every missing database capability:
+
+- Create versioned, additive SQL migrations.
+- Use appropriate primary keys and foreign keys.
+- Define correct data types and constraints.
+- Add indexes for actual query patterns.
+- Add appropriate uniqueness constraints.
+- Handle timestamps consistently.
+- Define ownership and membership relationships.
+- Add RLS policies.
+- Add safe database functions or triggers where required.
+- Keep migrations repeatable where practical.
+- Preserve all existing records.
+- Verify migrations against the actual schema.
+- Document the order in which migrations must run.
+
+Do not run destructive schema changes automatically.
+
+If a migration could affect existing data, explain the impact and preserve backward compatibility.
+
+## 3.4 Row-level security
+
+Enable and verify appropriate RLS policies for every user-accessible table that requires them.
+
+Policies must enforce the actual authorization model.
+
+Examples:
+
+- Users may read only conversations they are authorized to access.
+- Users may create messages only as themselves.
+- Users may modify or delete messages only when permitted.
+- Group actions must respect membership and role permissions.
+- Private tasks, notes, files, polls, and events must respect their parent conversation's access rules.
+- Private game rooms must be accessible only to authorized participants.
+- Device session records must not be exposed to other users.
+- Scheduled messages must not be accessible to unauthorized accounts.
+
+Do not rely only on hiding frontend buttons.
+
+Do not use unrestricted policies such as `USING (true)` or `WITH CHECK (true)` for private application data.
+
+Test access using multiple test users with different permissions.
+
+## 3.5 Supabase Storage
+
+Inspect and reuse existing storage buckets.
+
+Implement or repair:
+
+- Secure uploads.
+- Authorized downloads.
+- Correct object ownership.
+- File size and type validation.
+- Storage access policies.
+- Upload progress and failure handling.
+- Safe file deletion.
+- Signed URLs when appropriate.
+- Attachment metadata and database consistency.
+
+Never make private user files publicly accessible merely to simplify the implementation.
+
+## 3.6 Supabase Realtime
+
+Implement realtime using the appropriate existing Supabase functionality.
+
+Verify that authorized users receive the correct updates for:
+
+- New messages.
+- Message edits and deletions.
+- Delivery and read states.
+- Conversation updates.
+- Group membership changes.
+- Profile updates.
+- Task and poll updates.
+- Event and attendance changes.
+- Relevant game-room updates.
+- Notifications.
+
+Requirements:
+
+- Configure the necessary tables or channels correctly.
+- Verify publication or subscription configuration where applicable.
+- Use correct authorization for private channels.
+- Avoid duplicate subscriptions.
+- Clean up listeners when components unmount.
+- Handle reconnections and expired sessions.
+- Avoid marking a message as delivered merely because a local component rendered it.
+- Use appropriate server-confirmed states.
+- Prevent duplicate message insertion when realtime events arrive alongside API responses.
+- Keep pagination and message ordering consistent.
+
+Test with at least two independent authenticated sessions when the environment permits.
+
+## 3.7 Database reliability
+
+Implement:
+
+- Server-side validation for sensitive operations.
+- Transactions for operations that must succeed or fail together.
+- Idempotency for retryable operations.
+- Safe conflict handling.
+- Proper error reporting.
+- Pagination for large datasets.
+- Appropriate database indexes.
+- Consistent authorization checks.
+- Safe handling of concurrent updates.
+
+Never expose raw database errors containing sensitive details to end users.
+
+Log enough diagnostic information to troubleshoot failures without logging private message content or secrets unnecessarily.
+
+---
+
+# PART 4 — AUTHENTICATION, MESSAGES, AND CALLS
+
+Preserve existing account creation, login, profiles, conversations, and messaging.
+
+Test and repair:
+
+- Login and logout.
+- Session persistence.
+- Account and profile loading.
+- Contact discovery according to the existing privacy model.
+- Direct conversations.
+- Group conversations.
+- Message sending and receiving.
+- Message persistence across refreshes.
+- Message pagination and history.
+- Attachments and media.
+- Read and delivery status.
+- Message edits and deletions.
+- Blocked users and authorization restrictions.
+- Error and retry states.
+
+Do not create a new account for an existing authenticated user during routine profile or session updates.
+
+Do not replace the existing encryption implementation or weaken message security.
+
+For voice and video calling, inspect the current implementation and repair it. Verify signaling, room membership, media permissions, ICE handling, reconnection, and cleanup.
+
+Never display a successful call state unless a real connection has been established.
+
+---
+
+# PART 5 — AI MESSAGING FEATURES
+
+Implement the following features inside the existing chat interface.
+
+## 5.1 Long-chat summaries
+
+- Summarize long conversations.
+- Provide short, medium, and detailed formats.
+- Extract key points, decisions, deadlines, and action items.
+- Allow copying and saving.
+- Include references to relevant source messages where possible.
+- Handle long histories without silently omitting important context.
+
+## 5.2 Telugu-English translation
+
+- Translate Telugu to English and English to Telugu.
+- Preserve the original message.
+- Support Telugu script and supported transliterated text.
+- Allow users to view translations on demand.
+- Display clear errors when translation is unavailable.
+
+## 5.3 Reply suggestions and grammar correction
+
+- Suggest context-aware replies.
+- Offer different tones.
+- Correct grammar and spelling.
+- Allow editing before sending.
+- Never send a suggestion without user approval.
+
+## 5.4 Group decision detection
+
+- Identify proposed and confirmed decisions.
+- Extract tasks, deadlines, and unresolved questions.
+- Link results to source messages.
+- Allow authorized members to approve and save decisions.
+- Do not represent uncertain AI interpretations as confirmed facts.
+
+## 5.5 AI integration requirements
+
+Inspect whether an AI provider already exists.
+
+Reuse it if possible.
+
+Otherwise, implement a secure server-side integration using a configured provider.
+
+Never expose AI API secrets in frontend code.
+
+Handle:
+
+- Missing credentials.
+- Provider errors.
+- Rate limits.
+- Timeouts.
+- Long requests.
+- Loading states.
+- Retry behavior.
+- Usage limits.
+
+Do not claim AI functionality is operational until a real provider is configured and tested.
+
+---
+
+# PART 6 — SMART OFFLINE MODE
+
+Implement a persistent offline outbox.
+
+Requirements:
+
+- Cache previously loaded conversations and messages.
+- Allow access to cached conversations while offline.
+- Persist outgoing messages in a local queue.
+- Automatically retry when connectivity returns.
+- Use unique client-generated message IDs.
+- Implement idempotent message submission.
+- Prevent duplicate messages.
+- Preserve message order where practical.
+- Display pending, sending, sent, delivered, and failed states accurately.
+- Allow manual retry.
+- Handle browser refreshes and temporary disconnections.
+- Handle simultaneous tabs and conflicting updates.
+- Indicate when displayed content has not synchronized.
+- Clear or protect cached information according to the account's logout policy.
+
+Do not claim that all messages are synchronized while offline.
+
+Do not rely exclusively on browser memory for a persistent offline queue.
+
+---
+
+# PART 7 — MULTI-DEVICE SYNCHRONIZATION
+
+Implement reliable cross-device data synchronization.
+
+Features:
+
+- Message synchronization.
+- Conversation synchronization.
+- Read-state synchronization.
+- Profile and settings synchronization.
+- Linked-device management.
+- Device session revocation.
+- Session expiration handling.
+- Reauthentication when necessary.
+- Correct synchronization after reconnecting.
+- Protection against duplicate messages.
+
+Enforce device authorization on the server.
+
+Do not claim independent linked devices are end-to-end encrypted unless the existing encryption and device-key architecture genuinely supports it.
+
+---
+
+# PART 8 — CHAT ORGANIZATION AND SEARCH
+
+Implement:
+
+- Personal, Study, Work, and custom folders.
+- Folder creation, editing, ordering, and deletion.
+- Custom message labels.
+- Unread-only chat views.
+- Pinned conversations.
+- Bookmarked messages.
+- Filters for direct messages, groups, and archived chats.
+- Universal search across authorized messages and files.
+- Sender and date filters.
+- Search for shared links, document names, and available voice transcripts.
+- Saved-items library.
+- Message reminders.
+- Message export where authorized.
+
+Use efficient database queries, pagination, and indexes.
+
+Never expose another user's private search results.
+
+Respect the existing encryption architecture. Do not send encrypted message content to a search index unless the security design explicitly permits it.
+
+---
+
+# PART 9 — GROUP WORKSPACE
+
+Integrate the following into existing groups:
+
+- Task creation and assignment.
+- Task descriptions and deadlines.
+- Priorities and completion status.
+- Poll creation and voting.
+- Group events.
+- Event invitations and attendance.
+- Shared notes.
+- Shared files.
+- Decision records.
+- Relevant reminders and notifications.
+
+Use real database persistence.
+
+Enforce group membership and role permissions in the backend.
+
+Prevent duplicate votes when prohibited by the poll rules.
+
+Keep existing group messaging intact.
+
+Reuse existing tables and services where equivalent functionality exists.
+
+---
+
+# PART 10 — PRIVACY AND SECURITY CENTER
+
+Implement:
+
+- Per-chat privacy settings where supported.
+- Private chat folder and app-lock options.
+- Disappearing-message settings.
+- Active-session dashboard.
+- Login and security alerts.
+- Device revocation.
+- Presence and read-receipt controls.
+- Profile visibility settings.
+- Group invitation controls.
+- Block and report functionality.
+
+All security-sensitive actions must be enforced server-side.
+
+Implement actual message expiry behavior where disappearing messages are supported.
+
+Do not promise deletion of copies already saved by recipients.
+
+Do not introduce insecure cryptography or silently disable existing encryption.
+
+---
+
+# PART 11 — ADVANCED WEB CALLING
+
+Repair and extend the existing calling functionality.
+
+Implement where supported:
+
+- One-to-one audio calls.
+- One-to-one video calls.
+- Group calls.
+- Shareable call links.
+- Screen sharing.
+- Participant lists.
+- Microphone and camera controls.
+- Connection quality indicators.
+- Reconnection.
+- Call cleanup.
+- Call history.
+- Waiting rooms and host controls where appropriate.
+
+Inspect and reuse the existing calling stack.
+
+Use the appropriate WebRTC or existing SDK architecture.
+
+Configure signaling and ICE/TURN support as required.
+
+Protect private call rooms with proper authorization.
+
+Do not simulate successful connections.
+
+If external TURN infrastructure or provider credentials are required, identify that requirement instead of pretending connectivity is guaranteed.
+
+---
+
+# PART 12 — SHARED FILE SPACE
+
+Implement a persistent file library for existing chats and groups.
+
+Features:
+
+- Browse shared files.
+- Filter by type.
+- Search filenames and supported metadata.
+- View upload and download progress.
+- Display accurate storage usage when available.
+- Download authorized files.
+- Delete files according to permissions.
+- Detect duplicates efficiently.
+- Retry failed uploads.
+- Validate file types and sizes.
+- Use appropriate storage policies and signed URLs.
+
+Preserve existing attachments and records.
+
+Do not create duplicate file systems unnecessarily.
+
+---
+
+# PART 13 — MESSAGE SCHEDULER
+
+Implement:
+
+- Scheduled messages.
+- Schedule date and time selection.
+- Time-zone-aware scheduling.
+- Pending scheduled-message list.
+- Edit, cancel, and reschedule actions.
+- Birthday and event reminders.
+- Accurate status tracking.
+- Retry behavior.
+- Duplicate-send prevention.
+- Permission revalidation before sending.
+
+Use a reliable server-side scheduling mechanism.
+
+Do not depend on an open browser tab to deliver scheduled messages.
+
+If the current infrastructure cannot execute scheduled jobs, implement the compatible architecture and clearly identify the required deployment configuration.
+
+---
+
+# PART 14 — COMMUNITIES AND CHANNELS
+
+Add:
+
+- Community creation.
+- School, club, and interest-group communities.
+- Announcement channels.
+- Topic-based discussion.
+- Member roles.
+- Invitation links.
+- Moderation.
+- Reporting.
+- Pinned announcements.
+- Search and discovery where appropriate.
+- Notification preferences.
+
+Preserve existing groups and conversations.
+
+Enforce community privacy and membership permissions.
+
+---
+
+# PART 15 — FULL INTERFACE CUSTOMIZATION
+
+Integrate:
+
+- Light and dark themes.
+- Chat-specific wallpapers.
+- Accent colors.
+- Font-size controls.
+- Accessibility options.
+- Compact and comfortable layouts.
+- Responsive desktop and mobile views.
+- Persistent preferences.
+- Reset-to-default controls.
+
+Keep the existing ZOLO branding, layout, navigation, and working interactions.
+
+Do not unnecessarily redesign the whole application.
+
+Ensure all new controls actually work and persist appropriate settings.
+
+---
+
+# PART 16 — ZOLO PLAY GAMING PLATFORM
+
+Add a ZOLO PLAY section to the existing application.
+
+Do not replace the messaging application or create a disconnected demo.
+
+Implement playable games incrementally:
+
+1. ZOLO Hoops — basketball mini-game with controls, scoring, timer, and restart.
+2. ZOLO Kart Racing — 3D racing, checkpoints, laps, collisions, and race results.
+3. ZOLO Pool — aiming, shooting, ball physics, turns, and pocket detection.
+4. ZOLO Ludo — legal movement, dice rules, captures, turns, and win conditions.
+5. ZOLO Chess — legal moves, check, checkmate, castling, en passant, promotion, and draws.
+6. Draw & Guess — shared canvas, turns, word guessing, timer, and scores.
+7. ZOLO Quiz — questions, timers, scoring, and results.
+8. Tic-Tac-Toe — legal moves, win detection, draws, and rematches.
+9. Word Battle — word validation, timers, and scoring.
+10. Endless Runner — movement, obstacles, collisions, distance, and restart.
+
+Add:
+
+- Game launcher inside conversations.
+- Friend invitations.
+- Private game rooms.
+- Room invite codes.
+- Rematches.
+- Group tournaments.
+- Daily challenges.
+- Leaderboards.
+- Achievements and XP.
+- Unlockable avatars and cosmetic rewards.
+- Spectator mode where supported.
+- Party rooms.
+- Game challenge cards.
+- AI-generated quizzes if an AI provider is configured.
+- A collaborative virtual world as an advanced game mode.
+
+## Gaming reliability
+
+- Each game must actually be playable.
+- Validate important multiplayer state on the server.
+- Prevent client-side score manipulation.
+- Validate legal moves.
+- Protect private rooms.
+- Handle reconnects and abandoned rooms.
+- Prevent duplicate rewards.
+- Persist results and achievements.
+- Keep game state isolated between rooms.
+- Lazy-load heavy game assets.
+- Maintain acceptable performance on modest hardware.
+
+Do not create ten nonfunctional game cards and report the gaming platform as complete.
+
+Build, test, and integrate each game separately.
+
+---
+
+# PART 17 — ZOLO WORK AND ZOLO SPACES
+
+## ZOLO WORK
+
+Integrate:
+
+- Shared files.
+- Tasks and assignments.
+- Shared notes.
+- Events.
+- Meeting links.
+- Screen sharing.
+- Reminders.
+- Group decisions.
+- Searchable project conversations.
+
+Reuse the Group Workspace and existing messaging systems.
+
+## ZOLO SPACES
+
+Integrate:
+
+- Communities.
+- Announcement channels.
+- Topic-based discussions.
+- Voice rooms.
+- Community events.
+- Moderation.
+- Member roles.
+- Invitations.
+- Group game nights.
+- Notification settings.
+
+Reuse existing calling, messaging, and community infrastructure instead of creating duplicate systems.
+
+---
+
+# PART 18 — CODE QUALITY AND ERROR HANDLING
+
+Inspect and fix actual errors introduced by the implementation.
+
+Requirements:
+
+- No unresolved imports.
+- No missing components.
+- No broken routes.
+- No incompatible type definitions.
+- No empty critical event handlers.
+- No duplicate realtime listeners.
+- No unhandled critical promise rejections.
+- No silent failures.
+- No hardcoded fake database responses.
+- No secrets in frontend bundles.
+- No broken production build.
+- No unnecessary dependencies.
+- No destructive database initialization.
+- No removal of existing working functionality.
+
+Use the existing TypeScript and linting conventions.
+
+Validate all external input.
+
+Use consistent error handling and useful diagnostic logging.
+
+Do not suppress TypeScript errors or disable tests merely to obtain a successful build.
+
+---
+
+# PART 19 — AUTOMATED AND MANUAL VERIFICATION
+
+Create or extend tests using the existing test framework.
+
+## Database tests
+
+Verify:
+
+- Migrations apply safely.
+- Existing records remain intact.
+- RLS policies enforce access restrictions.
+- Unauthorized reads and writes fail.
+- Foreign keys and constraints behave correctly.
+- Storage policies prevent unauthorized access.
+- Concurrent updates do not create duplicate records.
+
+## Messaging tests
+
+Verify:
+
+- Messages persist after refresh.
+- Direct and group messaging work.
+- Realtime updates reach authorized users.
+- Failed messages can be retried.
+- Offline messages synchronize without duplicates.
+- Read and delivery states remain accurate.
+
+## AI tests
+
+Verify:
+
+- Summaries use actual conversation content.
+- Translation preserves original messages.
+- Suggestions require user approval.
+- Group decisions reference source messages.
+- Missing credentials produce clear errors.
+
+## Workspace tests
+
+Verify:
+
+- Tasks persist.
+- Poll voting follows configured rules.
+- Events and attendance persist.
+- Notes and decisions respect permissions.
+- Search results respect authorization.
+- Scheduled messages are not sent twice.
+
+## Calls and games
+
+Verify:
+
+- Calling uses real signaling and media connections.
+- Unauthorized users cannot join private calls.
+- Games implement their rules.
+- Multiplayer state is isolated.
+- Results are validated.
+- Reconnects do not duplicate moves or rewards.
+
+## Regression tests
+
+Test the existing application's critical flows before and after modifications.
+
+At minimum, verify existing login, profiles, messages, groups, media, calls, routing, and deployment build wherever the environment allows.
+
+Use automated tests and real integration tests where possible.
+
+If a live Supabase connection is unavailable, do not report live integration tests as successful.
+
+---
+
+# PART 20 — REQUIRED EXECUTION WORKFLOW
+
+Execute the following phases in order.
+
+## Phase 1: Audit
+
+Inspect the existing project and identify its actual framework, architecture, database, integrations, existing functionality, and errors.
+
+## Phase 2: Feature mapping
+
+For every requested feature, identify the existing files, services, tables, and dependencies that must be reused or modified.
+
+## Phase 3: Supabase foundation
+
+Repair configuration, schema compatibility, migrations, RLS, storage, and realtime before building features that depend on them.
+
+## Phase 4: Core messaging
+
+Verify authentication, profiles, direct messages, group messages, persistence, realtime, and attachments.
+
+## Phase 5: Reliability
+
+Implement offline queues, synchronization, device management, chat organization, search, and file management.
+
+## Phase 6: AI and collaboration
+
+Implement the AI assistant, tasks, polls, events, shared notes, decisions, scheduling, reminders, and communities.
+
+## Phase 7: Calling and privacy
+
+Repair existing calls and implement privacy controls, session management, and related security requirements.
+
+## Phase 8: Interface customization
+
+Add themes, accessibility settings, chat appearance options, and responsive improvements.
+
+## Phase 9: ZOLO PLAY
+
+Build and verify games individually. Begin with simpler games, then implement advanced multiplayer and 3D racing.
+
+## Phase 10: Integration
+
+Connect every feature to the actual existing navigation, database, authentication, services, and realtime architecture.
+
+## Phase 11: Verification
+
+Run builds, type checks, tests, database checks, authorization tests, and regression tests.
+
+## Phase 12: Deployment readiness
+
+Prepare the actual project for deployment using its existing hosting configuration. Identify any required environment variables, migrations, external services, or manual deployment steps.
+
+Do not stop after generating a plan. Begin implementing changes in the available project environment.
+
+If one execution cannot complete the entire project, preserve the changes and continue phase by phase. Never discard completed work or start over unnecessarily.
+
+---
+
+# PART 21 — COMPLETION REPORT
+
+At the end, provide a concise but accurate engineering report containing:
+
+1. Existing project architecture discovered.
+2. Files added and modified.
+3. Existing features preserved.
+4. Database migrations created.
+5. Supabase configuration verified.
+6. RLS policies added or corrected.
+7. Realtime subscriptions verified.
+8. Features fully implemented.
+9. Features partially implemented.
+10. Tests actually executed and their results.
+11. Build and type-check results.
+12. External credentials or infrastructure still required.
+13. Known issues and unresolved failures.
+14. Exact deployment and migration instructions.
+15. Any features that remain unverified.
+
+Never report success merely because the source code was generated.
+
+# FINAL DIRECTIVE
+
+**Modify the existing ZOLO project in place. Preserve all existing functionality and data. Make the Supabase database genuinely functional. Implement real backend-connected behavior for every new feature. Repair errors rather than hiding them. Test each feature and its authorization. Do not fabricate success.**
+
+Prioritize a reliable, secure core application and then integrate the remaining modules without breaking existing functionality.
+
+Start by inspecting the actual project files, then immediately proceed with implementation using the existing architecture.
