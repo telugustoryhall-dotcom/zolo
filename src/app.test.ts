@@ -1,0 +1,27 @@
+import { describe, it, expect } from 'vitest';
+import request from 'supertest';
+import { createApp } from './server/app.ts';
+
+describe('ZOLO Backend API Health', () => {
+  const app = createApp();
+
+  it('GET /api/health responds with status info', async () => {
+    const res = await request(app).get('/api/health');
+    expect([200, 503]).toContain(res.status);
+    expect(res.body).toHaveProperty('status');
+  });
+
+  it('GET /api/nonexistent returns 404', async () => {
+    const res = await request(app).get('/api/nonexistent');
+    expect(res.status).toBe(404);
+  });
+
+  it('unknown API methods return a JSON 404 with the request path', async () => {
+    const res = await request(app).post('/api/nonexistent');
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({
+      code: 'API_NOT_FOUND',
+      error: 'API endpoint not found: POST /api/nonexistent',
+    });
+  });
+});

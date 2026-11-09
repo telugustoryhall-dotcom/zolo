@@ -15,3 +15,7 @@ data/*.db-wal
 public/assets/aistudio/*.zip
 public/assets/aistudio/Paste*
 zolo-repair.zip
+
+# Development backups
+statussync.zip
+public/assets/aistudio/Paste*
