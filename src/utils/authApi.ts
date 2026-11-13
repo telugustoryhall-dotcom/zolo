@@ -834,14 +834,14 @@ export const authApi = {
   async uploadAdImage(file: File): Promise<{ url: string; mimeType: string; byteSize: number }> {
     const formData = new FormData();
     formData.append('file', file);
-    return apiFetch('/api/upload/ad-image', {
+    return apiFetch('/api/upload/campaign-image', {
       method: 'POST',
       body: formData,
     });
   },
 
   async listAdCampaigns(): Promise<{ campaigns: AdvertisementCampaign[] }> {
-    return apiFetch('/api/ads/campaigns');
+    return apiFetch('/api/promotions/campaigns');
   },
 
   async startAdVisitVerification(submissionId: string): Promise<{
@@ -851,21 +851,21 @@ export const authApi = {
     expiresAt: string;
     completedAt: string | null;
   }> {
-    return apiFetch('/api/ads/visit-verifications', {
+    return apiFetch('/api/promotions/visit-verifications', {
       method: 'POST',
       body: JSON.stringify({ submissionId }),
     });
   },
 
   async completeAdVisitVerification(verificationId: string): Promise<{ completed: boolean }> {
-    return apiFetch(`/api/ads/visit-verifications/${encodeURIComponent(verificationId)}/complete`, {
+    return apiFetch(`/api/promotions/visit-verifications/${encodeURIComponent(verificationId)}/complete`, {
       method: 'POST',
       body: JSON.stringify({}),
     });
   },
 
   async cancelAdVisitVerification(verificationId: string): Promise<{ success: boolean }> {
-    return apiFetch(`/api/ads/visit-verifications/${encodeURIComponent(verificationId)}`, {
+    return apiFetch(`/api/promotions/visit-verifications/${encodeURIComponent(verificationId)}`, {
       method: 'DELETE',
     });
   },
@@ -875,32 +875,32 @@ export const authApi = {
     verificationId: string,
     submissionId: string
   ): Promise<{ campaign: AdvertisementCampaign }> {
-    return apiFetch('/api/ads/campaigns', {
+    return apiFetch('/api/promotions/campaigns', {
       method: 'POST',
       body: JSON.stringify({ ...creative, verificationId, submissionId }),
     });
   },
 
   async updateAdCampaign(id: string, creative: AdCreativeInput): Promise<{ campaign: AdvertisementCampaign }> {
-    return apiFetch(`/api/ads/campaigns/${encodeURIComponent(id)}`, {
+    return apiFetch(`/api/promotions/campaigns/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(creative),
     });
   },
 
   async setAdCampaignStatus(id: string, status: 'approved' | 'paused'): Promise<{ campaign: AdvertisementCampaign }> {
-    return apiFetch(`/api/ads/campaigns/${encodeURIComponent(id)}/status`, {
+    return apiFetch(    `/api/promotions/campaigns/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     });
   },
 
   async deleteAdCampaign(id: string): Promise<{ success: boolean }> {
-    return apiFetch(`/api/ads/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return apiFetch(`/api/promotions/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   async fetchAdFeed(): Promise<{ campaigns: AdvertisementCampaign[] }> {
-    return apiFetch('/api/ads/feed');
+    return apiFetch('/api/promotions/feed');
   },
 
   async trackAdEvent(params: {
@@ -908,11 +908,11 @@ export const authApi = {
     eventType: 'impression' | 'click' | 'cta';
     eventKey: string;
   }): Promise<void> {
-    await apiFetch('/api/ads/events', { method: 'POST', body: JSON.stringify(params) });
+    await apiFetch('/api/promotions/events', { method: 'POST', body: JSON.stringify(params) });
   },
 
   async reportAdvertisement(campaignId: string, reason: string): Promise<void> {
-    await apiFetch('/api/ads/reports', {
+    await apiFetch('/api/promotions/reports', {
       method: 'POST',
       body: JSON.stringify({ campaignId, reason }),
     });
@@ -923,18 +923,18 @@ export const authApi = {
     reports: Array<{ campaignId: string; reason: string; createdAt: string }>;
     isAdmin: boolean;
   }> {
-    return apiFetch('/api/ads/admin/campaigns');
+    return apiFetch('/api/promotions/admin/campaigns');
   },
 
   async moderateAdvertisement(params: { campaignId: string; status: Extract<AdStatus, 'approved' | 'rejected' | 'paused'>; note: string }): Promise<{ campaign: AdvertisementCampaign }> {
-    return apiFetch(`/api/ads/admin/campaigns/${encodeURIComponent(params.campaignId)}`, {
+    return apiFetch(`/api/promotions/admin/campaigns/${encodeURIComponent(params.campaignId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: params.status, note: params.note }),
     });
   },
 
   async deleteAdvertisementAsAdmin(campaignId: string): Promise<{ success: boolean }> {
-    return apiFetch(`/api/ads/admin/campaigns/${encodeURIComponent(campaignId)}`, {
+    return apiFetch(`/api/promotions/admin/campaigns/${encodeURIComponent(campaignId)}`, {
       method: 'DELETE',
     });
   },

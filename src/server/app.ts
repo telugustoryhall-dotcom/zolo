@@ -644,7 +644,7 @@ export function createApp(options: CreateAppOptions = {}) {
   );
 
   app.post(
-    '/api/upload/ad-image',
+    ['/api/upload/ad-image', '/api/upload/campaign-image'],
     requireSessionAuth,
     adWriteLimiter,
     (req: Request, res: Response, next: NextFunction) => {
@@ -2783,7 +2783,7 @@ export function createApp(options: CreateAppOptions = {}) {
   );
 
   // ZOLO Ads: campaigns are private to their creator until an admin approves them.
-  app.get('/api/ads/feed', requireSessionAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  app.get(['/api/ads/feed', '/api/promotions/feed'], requireSessionAuth, async (_req: AuthenticatedRequest, res: Response) => {
     try {
       const campaigns = await listAdCampaigns({ status: 'approved' });
       res.json({ campaigns });
@@ -2793,7 +2793,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/api/ads/campaigns', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+  app.get(['/api/ads/campaigns', '/api/promotions/campaigns'], requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const campaigns = await listAdCampaigns({ advertiserPhone: req.authUser!.phoneNormalized });
       res.json({ campaigns: await getAdAnalytics(campaigns) });
@@ -2803,7 +2803,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/api/ads/visit-verifications', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.post(['/api/ads/visit-verifications', '/api/promotions/visit-verifications'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const session = await startAdVisitVerification(
         req.authUser!.phoneNormalized,
@@ -2819,7 +2819,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/api/ads/visit-verifications/:verificationId/complete', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.post(['/api/ads/visit-verifications/:verificationId/complete', '/api/promotions/visit-verifications/:verificationId/complete'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const result = await completeAdVisitVerification(
         req.authUser!.phoneNormalized,
@@ -2850,7 +2850,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.delete('/api/ads/visit-verifications/:verificationId', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.delete(['/api/ads/visit-verifications/:verificationId', '/api/promotions/visit-verifications/:verificationId'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       await cancelAdVisitVerification(
         req.authUser!.phoneNormalized,
@@ -2866,7 +2866,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/api/ads/campaigns', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.post(['/api/ads/campaigns', '/api/promotions/campaigns'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const creative = req.body as AdCreativeInput;
       if (!isTrustedAdImageUrl(creative?.imageUrl) ||
@@ -2888,7 +2888,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.patch('/api/ads/campaigns/:campaignId', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.patch(['/api/ads/campaigns/:campaignId', '/api/promotions/campaigns/:campaignId'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const creative = req.body as AdCreativeInput;
       if (!isTrustedAdImageUrl(creative?.imageUrl) ||
@@ -2913,7 +2913,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.patch('/api/ads/campaigns/:campaignId/status', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.patch(['/api/ads/campaigns/:campaignId/status', '/api/promotions/campaigns/:campaignId/status'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const campaign = await listAdCampaigns({ advertiserPhone: req.authUser!.phoneNormalized });
       const existing = campaign.find((item) => item.id === req.params.campaignId);
@@ -2939,7 +2939,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.delete('/api/ads/campaigns/:campaignId', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.delete(['/api/ads/campaigns/:campaignId', '/api/promotions/campaigns/:campaignId'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const success = await deleteAdCampaign(String(req.params.campaignId), req.authUser!.phoneNormalized);
       if (!success) {
@@ -2953,7 +2953,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/api/ads/events', requireSessionAuth, adEventLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.post(['/api/ads/events', '/api/promotions/events'], requireSessionAuth, adEventLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { campaignId, eventType, eventKey } = req.body as {
         campaignId?: string;
@@ -2982,7 +2982,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.post('/api/ads/reports', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.post(['/api/ads/reports', '/api/promotions/reports'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { campaignId, reason } = req.body as { campaignId?: string; reason?: string };
       if (typeof campaignId !== 'string' || (reason !== undefined && typeof reason !== 'string')) {
@@ -2997,7 +2997,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.get('/api/ads/admin/campaigns', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+  app.get(['/api/ads/admin/campaigns', '/api/promotions/admin/campaigns'], requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
     if (!isConfiguredAdAdmin(req.authUser!.phoneNormalized)) {
       res.status(403).json({ code: 'AD_ADMIN_REQUIRED', error: 'Administrator access is required.' });
       return;
@@ -3012,7 +3012,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.patch('/api/ads/admin/campaigns/:campaignId', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.patch(['/api/ads/admin/campaigns/:campaignId', '/api/promotions/admin/campaigns/:campaignId'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     if (!isConfiguredAdAdmin(req.authUser!.phoneNormalized)) {
       res.status(403).json({ code: 'AD_ADMIN_REQUIRED', error: 'Administrator access is required.' });
       return;
@@ -3044,7 +3044,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
-  app.delete('/api/ads/admin/campaigns/:campaignId', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+  app.delete(['/api/ads/admin/campaigns/:campaignId', '/api/promotions/admin/campaigns/:campaignId'], requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     if (!isConfiguredAdAdmin(req.authUser!.phoneNormalized)) {
       res.status(403).json({ code: 'AD_ADMIN_REQUIRED', error: 'Administrator access is required.' });
       return;

@@ -90,6 +90,7 @@ describe('Message links and preview safety', () => {
       try {
         await expect(authApi.listAdCampaigns()).resolves.toEqual({ campaigns: [] });
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/promotions/campaigns');
       } finally {
         vi.unstubAllGlobals();
       }
@@ -144,6 +145,15 @@ describe('Message links and preview safety', () => {
         request(app).post(`/api/community-invites/${'a'.repeat(64)}/request`),
       ]);
       expect(results.map((result) => result.status)).toEqual([401, 401, 401, 401, 401]);
+    });
+
+    it('keeps Ads APIs available on blocker-safe paths and their legacy paths', async () => {
+      const app = createApp();
+      const results = await Promise.all([
+        request(app).get('/api/promotions/campaigns'),
+        request(app).get('/api/ads/campaigns'),
+      ]);
+      expect(results.map((result) => result.status)).toEqual([401, 401]);
     });
   });
 
