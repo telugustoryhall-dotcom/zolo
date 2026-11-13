@@ -45,13 +45,53 @@ import {
   packCompoundRecoveryHash,
 } from '../src/lib/supabaseServer.ts';
 import { parseMessageLinks } from '../src/utils/messageLinks.ts';
-import { fetchSafeLinkPreview } from '../src/server/linkPreview.ts';
+import { extractLinkMetadata, fetchSafeLinkPreview } from '../src/server/linkPreview.ts';
 import { createStatusViewingSequence } from '../src/utils/statusAds.ts';
 import type { StatusStory } from '../src/types/chat.ts';
 import type { AdvertisementCampaign } from '../src/types/ads.ts';
-import { isAdsCampaignTableMissingError } from '../src/db/adsRepository.ts';
+import {
+  getAdVisitVerificationStatus,
+  isAdsCampaignTableMissingError,
+} from '../src/db/adsRepository.ts';
 
 describe('Message links and preview safety', () => {
+  it('enforces the full server-side timed visit and single-use expiry rules', () => {
+    const startedAt = Date.parse('2026-11-13T10:00:00.000Z');
+    const row = {
+      started_at: new Date(startedAt).toISOString(),
+      expires_at: new Date(startedAt + 30 * 60_000).toISOString(),
+      completed_at: null,
+      consumed_at: null,
+    };
+
+    expect(getAdVisitVerificationStatus(row, startedAt + 9_999)).toBe('too_early');
+    expect(getAdVisitVerificationStatus(row, startedAt + 10_000)).toBe('eligible');
+    expect(getAdVisitVerificationStatus(
+      { ...row, completed_at: new Date(startedAt + 10_000).toISOString() },
+      startedAt + 11_000
+    )).toBe('completed');
+    expect(getAdVisitVerificationStatus(
+      { ...row, consumed_at: new Date(startedAt + 16_000).toISOString() },
+      startedAt + 16_000
+    )).toBe('consumed');
+    expect(getAdVisitVerificationStatus(row, startedAt + 30 * 60_000)).toBe('expired');
+  });
+
+  it('prefers Open Graph and Twitter metadata with safe title fallbacks', () => {
+    const metadata = extractLinkMetadata(
+      '<html><head><title>Document title</title><meta property="og:title" content="Open Graph title"><meta name="twitter:description" content="Card description"><meta property="og:image" content="/preview.webp"></head></html>',
+      new URL('https://example.com/articles/one')
+    );
+    expect(metadata).toEqual({
+      title: 'Open Graph title',
+      description: 'Card description',
+      imageUrl: 'https://example.com/preview.webp',
+    });
+
+    expect(extractLinkMetadata('<title>Fallback</title>', new URL('https://example.com/')).title)
+      .toBe('Fallback');
+  });
+
   it('only enables local Ads fallback when the campaign table is missing', () => {
     expect(isAdsCampaignTableMissingError({
       code: 'PGRST205',

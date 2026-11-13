@@ -20,28 +20,23 @@ const previewCache = new Map<string, Preview | null>();
 export const MessageText: React.FC<MessageTextProps> = ({ text }) => {
   const links = parseMessageLinks(text);
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [previewUnavailable, setPreviewUnavailable] = useState(false);
 
   useEffect(() => {
     const first = links[0];
+    setPreview(null);
     if (!first) {
-      setPreview(null);
-      setPreviewUnavailable(false);
       return;
     }
     let active = true;
-    setPreviewUnavailable(false);
     const cached = previewCache.get(first.href);
     if (cached !== undefined) {
       setPreview(cached);
-      setPreviewUnavailable(cached === null);
     } else {
       authApi.getLinkPreview(first.href).then((value) => {
         previewCache.set(first.href, value);
         if (active) setPreview(value);
       }).catch(() => {
         previewCache.set(first.href, null);
-        if (active) setPreviewUnavailable(true);
       });
     }
     return () => {
@@ -94,9 +89,6 @@ export const MessageText: React.FC<MessageTextProps> = ({ text }) => {
             {preview.description && <div className="mt-1 line-clamp-2 text-[11px] text-slate-400">{preview.description}</div>}
           </div>
         </a>
-      )}
-      {!preview && previewUnavailable && (
-        <div role="status" className="mt-2 text-[10px] text-slate-400">Website preview is unavailable. The link can still be opened safely.</div>
       )}
     </>
   );

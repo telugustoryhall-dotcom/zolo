@@ -103,7 +103,10 @@ import {
 import { startSchedulerRunner } from './schedulerRunner.ts';
 import { fetchSafeLinkPreview, validatePublicWebUrl } from './linkPreview.ts';
 import {
-  createAdCampaign,
+  createVerifiedAdCampaign,
+  startAdVisitVerification,
+  completeAdVisitVerification,
+  cancelAdVisitVerification,
   deleteAdCampaign,
   getAdCampaign,
   getAdAnalytics,
@@ -354,15 +357,6 @@ export function createApp(options: CreateAppOptions = {}) {
         ...(turnCredential ? { credential: turnCredential } : {}),
       });
 
-      app.post('/api/links/preview', requireSessionAuth, linkPreviewLimiter, async (req: AuthenticatedRequest, res: Response) => {
-        try {
-          const preview = await fetchSafeLinkPreview(req.body?.url);
-          res.json(preview);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Could not load website preview.';
-          res.status(400).json({ code: 'LINK_PREVIEW_FAILED', error: message });
-        }
-      });
     }
 
     const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
@@ -386,6 +380,21 @@ export function createApp(options: CreateAppOptions = {}) {
       },
     });
   });
+
+  app.post(
+    '/api/links/preview',
+    requireSessionAuth,
+    linkPreviewLimiter,
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const preview = await fetchSafeLinkPreview(req.body?.url);
+        res.json(preview);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not load website preview.';
+        res.status(400).json({ code: 'LINK_PREVIEW_FAILED', error: message });
+      }
+    }
+  );
 
   app.get('/firebase-messaging-sw.js', (_req: Request, res: Response) => {
     const config = JSON.stringify({
@@ -2516,6 +2525,69 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   });
 
+  app.post('/api/ads/visit-verifications', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const session = await startAdVisitVerification(
+        req.authUser!.phoneNormalized,
+        String(req.body?.submissionId || '')
+      );
+      res.status(201).json(session);
+    } catch (error) {
+      console.error('Error in POST /api/ads/visit-verifications:', error);
+      res.status(400).json({
+        code: 'AD_VISIT_START_FAILED',
+        error: error instanceof Error ? error.message : 'Could not start advertisement verification.',
+      });
+    }
+  });
+
+  app.post('/api/ads/visit-verifications/:verificationId/complete', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const result = await completeAdVisitVerification(
+        req.authUser!.phoneNormalized,
+        String(req.params.verificationId)
+      );
+      if (result !== 'completed') {
+        const statusCode = result === 'too_early' ? 425 : result === 'expired' ? 410 : result === 'not_found' ? 404 : 409;
+        const messages = {
+          too_early: 'The 10-second timed visit has not elapsed yet.',
+          expired: 'This advertisement verification expired. Start the visit again.',
+          not_found: 'Advertisement verification was not found.',
+          consumed: 'This advertisement verification has already been used.',
+          completed: 'Advertisement verification completed.',
+        };
+        res.status(statusCode).json({
+          code: 'AD_VISIT_NOT_COMPLETED',
+          error: messages[result],
+        });
+        return;
+      }
+      res.json({ completed: true });
+    } catch (error) {
+      console.error('Error in POST /api/ads/visit-verifications/:verificationId/complete:', error);
+      res.status(500).json({
+        code: 'AD_VISIT_COMPLETE_FAILED',
+        error: 'Could not complete advertisement verification.',
+      });
+    }
+  });
+
+  app.delete('/api/ads/visit-verifications/:verificationId', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await cancelAdVisitVerification(
+        req.authUser!.phoneNormalized,
+        String(req.params.verificationId)
+      );
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error in DELETE /api/ads/visit-verifications/:verificationId:', error);
+      res.status(500).json({
+        code: 'AD_VISIT_CANCEL_FAILED',
+        error: 'Could not cancel advertisement verification.',
+      });
+    }
+  });
+
   app.post('/api/ads/campaigns', requireSessionAuth, adWriteLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const creative = req.body as AdCreativeInput;
@@ -2525,7 +2597,12 @@ export function createApp(options: CreateAppOptions = {}) {
         return;
       }
       await validatePublicWebUrl(creative.destinationUrl, true);
-      const campaign = await createAdCampaign(req.authUser!.phoneNormalized, creative);
+      const campaign = await createVerifiedAdCampaign({
+        advertiserPhone: req.authUser!.phoneNormalized,
+        submissionId: String(req.body?.submissionId || ''),
+        verificationId: String(req.body?.verificationId || ''),
+        creative,
+      });
       res.status(201).json({ campaign });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not create advertisement.';
@@ -2707,6 +2784,36 @@ export function createApp(options: CreateAppOptions = {}) {
       console.error('Error in DELETE /api/ads/admin/campaigns/:campaignId:', error);
       res.status(500).json({ code: 'AD_ADMIN_DELETE_FAILED', error: 'Could not remove advertisement.' });
     }
+  });
+
+  app.use('/api', (req: Request, res: Response) => {
+    res.status(404).json({
+      code: 'API_NOT_FOUND',
+      error: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+    });
+  });
+
+  app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+
+    const errorType =
+      error && typeof error === 'object' && 'type' in error && typeof error.type === 'string'
+        ? error.type
+        : '';
+    if (errorType === 'entity.parse.failed') {
+      res.status(400).json({ code: 'INVALID_JSON', error: 'Request body contains invalid JSON.' });
+      return;
+    }
+    if (errorType === 'entity.too.large') {
+      res.status(413).json({ code: 'REQUEST_TOO_LARGE', error: 'Request body exceeds the allowed size.' });
+      return;
+    }
+
+    console.error('Unhandled API request error:', error);
+    res.status(500).json({ code: 'INTERNAL_SERVER_ERROR', error: 'An unexpected server error occurred.' });
   });
 
   // Start background message scheduler runner

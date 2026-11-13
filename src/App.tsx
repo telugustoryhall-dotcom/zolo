@@ -7,7 +7,7 @@ import {
   INITIAL_STATUSES,
   INITIAL_CALLS,
 } from './data/initialData';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, type SidebarTabType } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { CallModal, CallSignalEvent } from './components/CallModal';
 import { GroupCallModal } from './components/GroupCallModal';
@@ -51,6 +51,12 @@ import { Lock, Loader2 } from 'lucide-react';
 
 const THEME_PREF_KEY = 'zolochat_theme_pref';
 const DEMO_CONTACT_IDS = new Set(['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'self']);
+
+interface ZoloHistoryState {
+  zoloAppNavigation?: true;
+  zoloTab?: SidebarTabType;
+  zoloChatId?: string | null;
+}
 
 function makePeerContactId(phoneNormalized: string): string {
   return `zolo_${phoneNormalized.replace(/[^\d+]/g, '')}`;
@@ -374,6 +380,7 @@ export default function App() {
 
   // Active chat state (null by default so neutral welcome screen shows instead of forced demo contact)
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTabType>('chats');
   const [typingContactId, setTypingContactId] = useState<string | null>(null);
 
   // Modals & Panels state
@@ -446,6 +453,59 @@ export default function App() {
   useEffect(() => {
     activeContactIdRef.current = activeContactId;
   }, [activeContactId]);
+
+  useEffect(() => {
+    if (!authUser) return;
+
+    const currentState = window.history.state as ZoloHistoryState | null;
+    if (!currentState?.zoloAppNavigation) {
+      window.history.replaceState(
+        {
+          ...(currentState && typeof currentState === 'object' ? currentState : {}),
+          zoloAppNavigation: true,
+          zoloTab: activeSidebarTab,
+          zoloChatId: activeContactIdRef.current,
+        },
+        '',
+        window.location.href
+      );
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state as ZoloHistoryState | null;
+      const nextTab = state?.zoloAppNavigation ? state.zoloTab : 'chats';
+      const nextContactId = state?.zoloAppNavigation ? state.zoloChatId || null : null;
+      setActiveSidebarTab(nextTab || 'chats');
+      activeContactIdRef.current = nextContactId;
+      setActiveContactId(nextContactId);
+      setIsContactInfoOpen(false);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [authUser, activeSidebarTab]);
+
+  const handleSidebarTabChange = (tab: SidebarTabType) => {
+    setActiveSidebarTab(tab);
+    const currentState = window.history.state as ZoloHistoryState | null;
+    if (
+      currentState?.zoloAppNavigation &&
+      currentState.zoloTab === tab &&
+      (currentState.zoloChatId || null) === activeContactIdRef.current
+    ) {
+      return;
+    }
+    window.history.pushState(
+      {
+        ...(currentState && typeof currentState === 'object' ? currentState : {}),
+        zoloAppNavigation: true,
+        zoloTab: tab,
+        zoloChatId: activeContactIdRef.current,
+      },
+      '',
+      window.location.href
+    );
+  };
 
   useEffect(() => {
     activeCallRef.current = activeCall;
@@ -1749,6 +1809,23 @@ export default function App() {
 
   // Select contact & clear unread badge (+ mark real messages read on server)
   const handleSelectContact = (id: string) => {
+    const currentState = window.history.state as ZoloHistoryState | null;
+    if (
+      !currentState?.zoloAppNavigation ||
+      currentState.zoloChatId !== id ||
+      currentState.zoloTab !== activeSidebarTab
+    ) {
+      window.history.pushState(
+        {
+          ...(currentState && typeof currentState === 'object' ? currentState : {}),
+          zoloAppNavigation: true,
+          zoloTab: activeSidebarTab,
+          zoloChatId: id,
+        },
+        '',
+        window.location.href
+      );
+    }
     activeContactIdRef.current = id;
     setActiveContactId(id);
     setContacts((prev) =>
@@ -2417,6 +2494,8 @@ export default function App() {
             <Sidebar
               contacts={contacts}
               activeContactId={activeContactId}
+              activeTab={activeSidebarTab}
+              onActiveTabChange={handleSidebarTabChange}
               statuses={statuses}
               callLogs={callLogs}
               allMessages={messages}
@@ -2531,7 +2610,15 @@ export default function App() {
                 onOpenLocationModal={() => setIsLocationModalOpen(true)}
                 onTypingChange={handleTypingChange}
                 onRetryMessage={handleRetryMessage}
-                onBackMobile={() => setActiveContactId(null)}
+                onBackMobile={() => {
+                  const state = window.history.state as ZoloHistoryState | null;
+                  if (state?.zoloAppNavigation && state.zoloChatId === activeContact.id) {
+                    window.history.back();
+                  } else {
+                    activeContactIdRef.current = null;
+                    setActiveContactId(null);
+                  }
+                }}
                 onOpenAiTools={() => setIsAiToolsOpen(true)}
                 onOpenWorkspace={() => setIsGroupWorkspaceOpen(true)}
                 onOpenScheduler={() => setIsSchedulerOpen(true)}

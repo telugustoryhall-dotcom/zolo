@@ -18,6 +18,8 @@ import type { AuthenticatedUser } from '../types/auth';
 interface SidebarProps {
   contacts: Contact[];
   activeContactId: string | null;
+  activeTab: SidebarTabType;
+  onActiveTabChange: (tab: SidebarTabType) => void;
   statuses: StatusStory[];
   callLogs: CallLog[];
   allMessages: Record<string, Message[]>;
@@ -47,13 +49,15 @@ interface SidebarProps {
   onOpenAds?: () => void;
 }
 
-type TabType = 'chats' | 'status' | 'calls' | 'starred' | 'archived' | 'settings';
+export type SidebarTabType = 'chats' | 'status' | 'calls' | 'starred' | 'archived' | 'settings';
 type ChatFilterType = string;
 type CallFilterType = 'all' | 'missed';
 
 export const Sidebar: React.FC<SidebarProps> = ({
   contacts,
   activeContactId,
+  activeTab,
+  onActiveTabChange,
   statuses,
   callLogs,
   allMessages,
@@ -82,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenZoloPlay,
   onOpenAds,
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('chats');
+  const setActiveTab = onActiveTabChange;
   const [chatFilter, setChatFilter] = useState<ChatFilterType>('all');
   const [callFilter, setCallFilter] = useState<CallFilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');

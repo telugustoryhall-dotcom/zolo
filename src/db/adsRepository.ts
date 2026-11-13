@@ -134,11 +134,303 @@ function normalizeCreative(input: AdCreativeInput): AdCreativeInput {
   return result;
 }
 
-export async function createAdCampaign(advertiserPhone: string, input: AdCreativeInput): Promise<AdvertisementCampaign> {
+const AD_VISIT_DURATION_MS = 10_000;
+const AD_VISIT_TTL_MS = 30 * 60_000;
+
+interface AdVisitVerificationRow {
+  id: string;
+  advertiser_phone: string;
+  submission_id: string;
+  started_at: string;
+  completed_at: string | null;
+  consumed_at: string | null;
+  expires_at: string;
+}
+
+export type AdVisitVerificationStatus =
+  | 'eligible'
+  | 'completed'
+  | 'too_early'
+  | 'expired'
+  | 'not_found'
+  | 'consumed';
+
+export function getAdVisitVerificationStatus(
+  row: Pick<AdVisitVerificationRow, 'started_at' | 'expires_at' | 'completed_at' | 'consumed_at'>,
+  now: number
+): AdVisitVerificationStatus {
+  if (row.consumed_at) return 'consumed';
+  const expiresAt = Date.parse(row.expires_at);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) return 'expired';
+  const startedAt = Date.parse(row.started_at);
+  if (!Number.isFinite(startedAt) || startedAt + AD_VISIT_DURATION_MS > now) return 'too_early';
+  return row.completed_at ? 'completed' : 'eligible';
+}
+
+function mapAdVisitVerification(row: AdVisitVerificationRow) {
+  return {
+    verificationId: row.id,
+    submissionId: row.submission_id,
+    startedAt: row.started_at,
+    expiresAt: row.expires_at,
+    completedAt: row.completed_at,
+  };
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export async function startAdVisitVerification(
+  advertiserPhone: string,
+  submissionId: string
+): Promise<ReturnType<typeof mapAdVisitVerification>> {
+  if (!isUuid(submissionId)) throw new Error('Invalid advertisement submission ID.');
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + AD_VISIT_TTL_MS).toISOString();
+  const supabase = getAdsSupabaseClient();
+  if (supabase) {
+    const { data: existing, error: existingError } = await supabase
+      .from('ad_visit_verifications')
+      .select('*')
+      .eq('advertiser_phone', advertiserPhone)
+      .eq('submission_id', submissionId)
+      .maybeSingle();
+    if (existingError) throw new Error(`Could not load advertisement verification: ${existingError.message}`);
+    if (
+      existing &&
+      !existing.consumed_at &&
+      Date.parse(existing.expires_at) > now.getTime()
+    ) {
+      return mapAdVisitVerification(existing as AdVisitVerificationRow);
+    }
+
+    const row: AdVisitVerificationRow = {
+      id: crypto.randomUUID(),
+      advertiser_phone: advertiserPhone,
+      submission_id: submissionId,
+      started_at: now.toISOString(),
+      completed_at: null,
+      consumed_at: null,
+      expires_at: expiresAt,
+    };
+    const { data, error } = await supabase
+      .from('ad_visit_verifications')
+      .upsert(row, { onConflict: 'advertiser_phone,submission_id' })
+      .select('*')
+      .single();
+    if (error) throw new Error(`Could not start advertisement verification: ${error.message}`);
+    return mapAdVisitVerification(data as AdVisitVerificationRow);
+  }
+
+  const db = getLocalDb();
+  const existing = db.prepare(`
+    SELECT * FROM local_ad_visit_verifications
+    WHERE advertiser_phone = ? AND submission_id = ?
+  `).get(advertiserPhone, submissionId) as Record<string, unknown> | undefined;
+  if (
+    existing &&
+    !existing.consumed_at &&
+    Date.parse(String(existing.expires_at)) > now.getTime()
+  ) {
+    return mapAdVisitVerification(existing as unknown as AdVisitVerificationRow);
+  }
+  const row: AdVisitVerificationRow = {
+    id: crypto.randomUUID(),
+    advertiser_phone: advertiserPhone,
+    submission_id: submissionId,
+    started_at: now.toISOString(),
+    completed_at: null,
+    consumed_at: null,
+    expires_at: expiresAt,
+  };
+  db.prepare(`
+    INSERT INTO local_ad_visit_verifications
+      (id, advertiser_phone, submission_id, started_at, completed_at, consumed_at, expires_at)
+    VALUES (?, ?, ?, ?, NULL, NULL, ?)
+    ON CONFLICT(advertiser_phone, submission_id) DO UPDATE SET
+      id = excluded.id,
+      started_at = excluded.started_at,
+      completed_at = NULL,
+      consumed_at = NULL,
+      expires_at = excluded.expires_at
+  `).run(row.id, row.advertiser_phone, row.submission_id, row.started_at, row.expires_at);
+  return mapAdVisitVerification(row);
+}
+
+export async function completeAdVisitVerification(
+  advertiserPhone: string,
+  verificationId: string
+): Promise<'completed' | 'too_early' | 'expired' | 'not_found' | 'consumed'> {
+  const now = new Date();
+  const supabase = getAdsSupabaseClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('ad_visit_verifications')
+      .select('*')
+      .eq('id', verificationId)
+      .eq('advertiser_phone', advertiserPhone)
+      .maybeSingle();
+    if (error) throw new Error(`Could not verify advertisement visit: ${error.message}`);
+    if (!data) return 'not_found';
+    const row = data as AdVisitVerificationRow;
+    const status = getAdVisitVerificationStatus(row, now.getTime());
+    if (status !== 'eligible') return status;
+    const { data: updated, error: updateError } = await supabase
+      .from('ad_visit_verifications')
+      .update({ completed_at: now.toISOString() })
+      .eq('id', verificationId)
+      .eq('advertiser_phone', advertiserPhone)
+      .is('completed_at', null)
+      .is('consumed_at', null)
+      .gt('expires_at', now.toISOString())
+      .select('id')
+      .maybeSingle();
+    if (updateError) throw new Error(`Could not complete advertisement verification: ${updateError.message}`);
+    return updated ? 'completed' : 'consumed';
+  }
+
+  const db = getLocalDb();
+  const row = db.prepare(`
+    SELECT * FROM local_ad_visit_verifications WHERE id = ? AND advertiser_phone = ?
+  `).get(verificationId, advertiserPhone) as Record<string, unknown> | undefined;
+  if (!row) return 'not_found';
+  const status = getAdVisitVerificationStatus({
+    started_at: String(row.started_at),
+    expires_at: String(row.expires_at),
+    completed_at: row.completed_at ? String(row.completed_at) : null,
+    consumed_at: row.consumed_at ? String(row.consumed_at) : null,
+  }, now.getTime());
+  if (status !== 'eligible') return status;
+  const result = db.prepare(`
+    UPDATE local_ad_visit_verifications SET completed_at = ?
+    WHERE id = ? AND advertiser_phone = ? AND completed_at IS NULL
+      AND consumed_at IS NULL AND expires_at > ?
+  `).run(now.toISOString(), verificationId, advertiserPhone, now.toISOString());
+  return Number(result.changes) > 0 ? 'completed' : 'consumed';
+}
+
+export async function cancelAdVisitVerification(
+  advertiserPhone: string,
+  verificationId: string
+): Promise<void> {
+  const cancelledAt = new Date().toISOString();
+  const supabase = getAdsSupabaseClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from('ad_visit_verifications')
+      .update({ consumed_at: cancelledAt })
+      .eq('id', verificationId)
+      .eq('advertiser_phone', advertiserPhone)
+      .is('consumed_at', null);
+    if (error) throw new Error(`Could not cancel advertisement verification: ${error.message}`);
+    return;
+  }
+  getLocalDb().prepare(`
+    UPDATE local_ad_visit_verifications SET consumed_at = ?
+    WHERE id = ? AND advertiser_phone = ? AND consumed_at IS NULL
+  `).run(cancelledAt, verificationId, advertiserPhone);
+}
+
+async function consumeAdVisitVerification(
+  advertiserPhone: string,
+  verificationId: string,
+  submissionId: string
+): Promise<string | null> {
+  const now = new Date().toISOString();
+  const supabase = getAdsSupabaseClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('ad_visit_verifications')
+      .update({ consumed_at: now })
+      .eq('id', verificationId)
+      .eq('advertiser_phone', advertiserPhone)
+      .eq('submission_id', submissionId)
+      .not('completed_at', 'is', null)
+      .is('consumed_at', null)
+      .gt('expires_at', now)
+      .select('consumed_at')
+      .maybeSingle();
+    if (error) throw new Error(`Could not authorize advertisement submission: ${error.message}`);
+    return data ? String(data.consumed_at) : null;
+  }
+  const db = getLocalDb();
+  const result = db.prepare(`
+    UPDATE local_ad_visit_verifications SET consumed_at = ?
+    WHERE id = ? AND advertiser_phone = ? AND submission_id = ?
+      AND completed_at IS NOT NULL AND consumed_at IS NULL AND expires_at > ?
+  `).run(now, verificationId, advertiserPhone, submissionId, now);
+  return Number(result.changes) > 0 ? now : null;
+}
+
+async function releaseAdVisitVerification(
+  advertiserPhone: string,
+  verificationId: string,
+  consumedAt: string
+): Promise<void> {
+  const supabase = getAdsSupabaseClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from('ad_visit_verifications')
+      .update({ consumed_at: null })
+      .eq('id', verificationId)
+      .eq('advertiser_phone', advertiserPhone)
+      .eq('consumed_at', consumedAt);
+    if (error) throw new Error(`Could not restore advertisement verification: ${error.message}`);
+    return;
+  }
+  getLocalDb().prepare(`
+    UPDATE local_ad_visit_verifications SET consumed_at = NULL
+    WHERE id = ? AND advertiser_phone = ? AND consumed_at = ?
+  `).run(verificationId, advertiserPhone, consumedAt);
+}
+
+export async function createVerifiedAdCampaign(params: {
+  advertiserPhone: string;
+  submissionId: string;
+  verificationId: string;
+  creative: AdCreativeInput;
+}): Promise<AdvertisementCampaign> {
+  if (!isUuid(params.submissionId) || !isUuid(params.verificationId)) {
+    throw new Error('Invalid advertisement verification.');
+  }
+  const creative = normalizeCreative(params.creative);
+  const campaignId = `ad_${params.submissionId.replace(/-/g, '')}`;
+  const existing = await getAdCampaign(campaignId);
+  if (existing) {
+    if (existing.advertiserPhone !== params.advertiserPhone) {
+      throw new Error('Advertisement submission does not belong to this account.');
+    }
+    const existingCreative = normalizeCreative(existing);
+    if (JSON.stringify(existingCreative) !== JSON.stringify(creative)) {
+      throw new Error('This advertisement submission ID has already been used.');
+    }
+    return existing;
+  }
+
+  const consumedAt = await consumeAdVisitVerification(
+    params.advertiserPhone,
+    params.verificationId,
+    params.submissionId
+  );
+  if (!consumedAt) throw new Error('Complete the VYNDORS timed visit before submitting this advertisement.');
+  try {
+    return await createAdCampaign(params.advertiserPhone, creative, campaignId);
+  } catch (error) {
+    await releaseAdVisitVerification(params.advertiserPhone, params.verificationId, consumedAt);
+    throw error;
+  }
+}
+
+export async function createAdCampaign(
+  advertiserPhone: string,
+  input: AdCreativeInput,
+  campaignId?: string
+): Promise<AdvertisementCampaign> {
   const creative = normalizeCreative(input);
   const now = new Date().toISOString();
   const campaign: AdvertisementCampaign = {
-    id: `ad_${crypto.randomUUID()}`,
+    id: campaignId || `ad_${crypto.randomUUID()}`,
     advertiserPhone,
     ...creative,
     subtitle: creative.subtitle || '',

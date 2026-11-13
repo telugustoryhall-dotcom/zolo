@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BarChart3, ExternalLink, Loader2, Megaphone, Plus, Trash2, Upload, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, BarChart3, Clock3, ExternalLink, Loader2, Megaphone, Plus, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import { authApi, AuthApiClientError } from '../utils/authApi';
 import type { AdCreativeInput, AdvertisementCampaign } from '../types/ads';
 
@@ -17,6 +17,17 @@ const EMPTY_CREATIVE: AdCreativeInput = {
   destinationUrl: '',
   ctaText: 'Visit Website',
 };
+
+const VYNDORS_URL = 'https://vyndors.netlify.app/';
+const REQUIRED_VISIT_MS = 10_000;
+
+interface AdVisitSession {
+  verificationId: string;
+  submissionId: string;
+  startedAt: string;
+  expiresAt: string;
+  completedAt: string | null;
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -36,6 +47,14 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [submissionId, setSubmissionId] = useState(() => crypto.randomUUID());
+  const [visitSession, setVisitSession] = useState<AdVisitSession | null>(null);
+  const [visitModalOpen, setVisitModalOpen] = useState(false);
+  const [visitedMilliseconds, setVisitedMilliseconds] = useState(0);
+  const [visitCompleting, setVisitCompleting] = useState(false);
+  const [visitCancelling, setVisitCancelling] = useState(false);
+  const [visitError, setVisitError] = useState('');
+  const completionAttemptRef = useRef(false);
 
   const refresh = async () => {
     setIsLoading(true);
@@ -75,17 +94,25 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
     setEditingId(null);
     setIsFormOpen(false);
     setError('');
+    setVisitSession(null);
+    setVisitModalOpen(false);
+    setVisitedMilliseconds(0);
+    setVisitError('');
+    setSubmissionId(crypto.randomUUID());
   };
 
-  const saveCreative = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const submitCreative = async (verification?: AdVisitSession) => {
     setBusy(true);
     setError('');
     setNotice('');
     try {
       const result = editingId
         ? await authApi.updateAdCampaign(editingId, creative)
-        : await authApi.createAdCampaign(creative);
+        : await authApi.createAdCampaign(
+            creative,
+            verification?.verificationId || '',
+            verification?.submissionId || submissionId
+          );
       setCampaigns((current) => [
         result.campaign,
         ...current.filter((campaign) => campaign.id !== result.campaign.id),
@@ -96,6 +123,103 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
       setError(getErrorMessage(saveError));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const completeVisit = useCallback(async () => {
+    if (!visitSession || visitSession.completedAt || completionAttemptRef.current) return;
+    completionAttemptRef.current = true;
+    setVisitCompleting(true);
+    setVisitError('');
+    try {
+      await authApi.completeAdVisitVerification(visitSession.verificationId);
+      setVisitSession((current) => current
+        ? { ...current, completedAt: new Date().toISOString() }
+        : current);
+    } catch (completionError) {
+      setVisitError(getErrorMessage(completionError));
+    } finally {
+      completionAttemptRef.current = false;
+      setVisitCompleting(false);
+    }
+  }, [visitSession]);
+
+  useEffect(() => {
+    if (!visitSession || visitSession.completedAt) return;
+    let activeElapsed = 0;
+    let activeSince: number | null =
+      document.visibilityState === 'visible' && document.hasFocus() ? Date.now() : null;
+
+    const updateActiveTime = () => {
+      const now = Date.now();
+      const isActive = document.visibilityState === 'visible' && document.hasFocus();
+      if (activeSince !== null) activeElapsed += Math.max(0, now - activeSince);
+      activeSince = isActive ? now : null;
+      const boundedElapsed = Math.min(activeElapsed, REQUIRED_VISIT_MS);
+      setVisitedMilliseconds(boundedElapsed);
+      if (boundedElapsed >= REQUIRED_VISIT_MS) void completeVisit();
+    };
+
+    const interval = window.setInterval(updateActiveTime, 250);
+    document.addEventListener('visibilitychange', updateActiveTime);
+    window.addEventListener('focus', updateActiveTime);
+    window.addEventListener('blur', updateActiveTime);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', updateActiveTime);
+      window.removeEventListener('focus', updateActiveTime);
+      window.removeEventListener('blur', updateActiveTime);
+    };
+  }, [visitSession, completeVisit]);
+
+  const saveCreative = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    if (editingId) {
+      await submitCreative();
+      return;
+    }
+    if (visitSession) {
+      setVisitModalOpen(true);
+      return;
+    }
+
+    window.open(VYNDORS_URL, '_blank', 'noopener,noreferrer');
+    setBusy(true);
+    setError('');
+    setVisitError('');
+    try {
+      const session = await authApi.startAdVisitVerification(submissionId);
+      setVisitSession(session);
+      setVisitedMilliseconds(0);
+      setVisitModalOpen(true);
+    } catch (startError) {
+      setError(getErrorMessage(startError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const continuePublishing = async () => {
+    if (!visitSession?.completedAt || busy) return;
+    setVisitModalOpen(false);
+    await submitCreative(visitSession);
+  };
+
+  const cancelVisit = async () => {
+    if (!visitSession || visitCancelling) return;
+    setVisitCancelling(true);
+    setVisitError('');
+    try {
+      await authApi.cancelAdVisitVerification(visitSession.verificationId);
+      setVisitSession(null);
+      setVisitModalOpen(false);
+      setVisitedMilliseconds(0);
+      setSubmissionId(crypto.randomUUID());
+    } catch (cancelError) {
+      setVisitError(getErrorMessage(cancelError));
+    } finally {
+      setVisitCancelling(false);
     }
   };
 
@@ -335,6 +459,99 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
           )}
         </div>
       </div>
+      {visitModalOpen && visitSession && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="vyndors-visit-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111b21] p-6 text-white shadow-2xl">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <h2 id="vyndors-visit-title" className="text-center text-lg font-bold">
+              Visit VYNDORS before publishing your advertisement
+            </h2>
+            <p className="mt-2 text-center text-sm text-slate-300">
+              Complete the 10-second timed visit step to continue submitting your advertisement on ZOLO.
+            </p>
+            <a
+              href={VYNDORS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-emerald-200 hover:bg-white/10"
+            >
+              VYNDORS · vyndors.netlify.app
+              <ExternalLink className="h-4 w-4" />
+            </a>
+            <div className="mt-6 flex items-center justify-center gap-2 text-sm text-slate-300">
+              <Clock3 className="h-4 w-4 text-emerald-300" />
+              {visitSession.completedAt
+                ? 'Timed visit complete'
+                : `${Math.ceil(Math.max(0, REQUIRED_VISIT_MS - visitedMilliseconds) / 1000)} seconds remaining`}
+            </div>
+            <div
+              className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"
+              role="progressbar"
+              aria-label="VYNDORS timed visit progress"
+              aria-valuemin={0}
+              aria-valuemax={10}
+              aria-valuenow={Math.floor(visitedMilliseconds / 1000)}
+            >
+              <div
+                className="h-full rounded-full bg-emerald-400 transition-[width]"
+                style={{ width: `${visitSession.completedAt ? 100 : (visitedMilliseconds / REQUIRED_VISIT_MS) * 100}%` }}
+              />
+            </div>
+            <p className="mt-3 text-center text-xs text-slate-400">
+              The timer runs only while this ZOLO tab is visible and focused. This timed step does not verify human engagement with VYNDORS.
+            </p>
+            {visitError && (
+              <div role="alert" className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+                {visitError}
+              </div>
+            )}
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => void cancelVisit()}
+                disabled={visitCancelling || visitCompleting}
+                className="min-h-11 rounded-lg bg-white/10 px-4 text-sm font-medium hover:bg-white/15 disabled:opacity-50"
+              >
+                {visitCancelling ? 'Canceling…' : 'Cancel visit'}
+              </button>
+              {visitError && !visitSession.completedAt && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (visitError.toLowerCase().includes('expired')) {
+                      setVisitSession(null);
+                      setVisitedMilliseconds(0);
+                      setVisitModalOpen(false);
+                      return;
+                    }
+                    void completeVisit();
+                  }}
+                  disabled={visitCompleting || visitedMilliseconds < REQUIRED_VISIT_MS}
+                  className="min-h-11 rounded-lg border border-white/10 px-4 text-sm font-medium disabled:opacity-50"
+                >
+                  {visitError.toLowerCase().includes('expired') ? 'Restart visit' : 'Retry verification'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void continuePublishing()}
+                disabled={!visitSession.completedAt || busy}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                Continue to submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

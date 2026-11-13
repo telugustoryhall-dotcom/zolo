@@ -712,8 +712,41 @@ export const authApi = {
     return apiFetch('/api/ads/campaigns');
   },
 
-  async createAdCampaign(creative: AdCreativeInput): Promise<{ campaign: AdvertisementCampaign }> {
-    return apiFetch('/api/ads/campaigns', { method: 'POST', body: JSON.stringify(creative) });
+  async startAdVisitVerification(submissionId: string): Promise<{
+    verificationId: string;
+    submissionId: string;
+    startedAt: string;
+    expiresAt: string;
+    completedAt: string | null;
+  }> {
+    return apiFetch('/api/ads/visit-verifications', {
+      method: 'POST',
+      body: JSON.stringify({ submissionId }),
+    });
+  },
+
+  async completeAdVisitVerification(verificationId: string): Promise<{ completed: boolean }> {
+    return apiFetch(`/api/ads/visit-verifications/${encodeURIComponent(verificationId)}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  async cancelAdVisitVerification(verificationId: string): Promise<{ success: boolean }> {
+    return apiFetch(`/api/ads/visit-verifications/${encodeURIComponent(verificationId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async createAdCampaign(
+    creative: AdCreativeInput,
+    verificationId: string,
+    submissionId: string
+  ): Promise<{ campaign: AdvertisementCampaign }> {
+    return apiFetch('/api/ads/campaigns', {
+      method: 'POST',
+      body: JSON.stringify({ ...creative, verificationId, submissionId }),
+    });
   },
 
   async updateAdCampaign(id: string, creative: AdCreativeInput): Promise<{ campaign: AdvertisementCampaign }> {

@@ -307,6 +307,19 @@ export function getLocalDb(): DatabaseSync {
       CREATE INDEX IF NOT EXISTS idx_local_ads_feed ON local_ad_campaigns(status, updated_at);
       CREATE INDEX IF NOT EXISTS idx_local_ads_owner ON local_ad_campaigns(advertiser_phone, created_at);
 
+      CREATE TABLE IF NOT EXISTS local_ad_visit_verifications (
+        id TEXT PRIMARY KEY,
+        advertiser_phone TEXT NOT NULL,
+        submission_id TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        consumed_at TEXT,
+        expires_at TEXT NOT NULL,
+        UNIQUE(advertiser_phone, submission_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_ad_visit_verifications_expiry
+        ON local_ad_visit_verifications(expires_at);
+
       CREATE TABLE IF NOT EXISTS local_ad_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         campaign_id TEXT NOT NULL REFERENCES local_ad_campaigns(id) ON DELETE CASCADE,

@@ -397,17 +397,35 @@ BEGIN
   END IF;
 END $$;
 
-ALTER PUBLICATION supabase_realtime ADD TABLE public.users;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.direct_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.conversations;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.conversation_members;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.status_stories;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.call_records;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.call_participants;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.group_tasks;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.group_notes;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.group_events;
+DO $$
+DECLARE
+  table_name TEXT;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY[
+    'users',
+    'direct_messages',
+    'conversations',
+    'conversation_members',
+    'messages',
+    'status_stories',
+    'call_records',
+    'call_participants',
+    'group_tasks',
+    'group_notes',
+    'group_events',
+    'scheduled_messages'
+  ] LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = table_name
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', table_name);
+    END IF;
+  END LOOP;
+END $$;
 
 -- ==================================================================
 -- 12. FCM DEVICE TOKENS AND ACCOUNT NOTIFICATION PREFERENCES
@@ -446,7 +464,6 @@ CREATE TABLE IF NOT EXISTS public.notification_events (
 CREATE INDEX IF NOT EXISTS idx_notification_events_created ON public.notification_events (created_at);
 ALTER TABLE public.notification_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.notification_events FROM anon, authenticated;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.scheduled_messages;
 
 -- ============================================================================
 -- 12. ROW LEVEL SECURITY (RLS) POLICIES
@@ -468,82 +485,82 @@ ALTER TABLE public.group_notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scheduled_messages ENABLE ROW LEVEL SECURITY;
 
--- Backend Service & Authenticated Client Policies
+-- Backend service-role policies
 DROP POLICY IF EXISTS "Backend call participants access" ON public.call_participants;
 CREATE POLICY "Backend call participants access" ON public.call_participants
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Backend users access" ON public.users;
 CREATE POLICY "Backend users access" ON public.users
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend sessions access" ON public.auth_sessions;
 CREATE POLICY "Backend sessions access" ON public.auth_sessions
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend media access" ON public.stored_media;
 CREATE POLICY "Backend media access" ON public.stored_media
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend direct messages access" ON public.direct_messages;
 CREATE POLICY "Backend direct messages access" ON public.direct_messages
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend conversations access" ON public.conversations;
 CREATE POLICY "Backend conversations access" ON public.conversations
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend members access" ON public.conversation_members;
 CREATE POLICY "Backend members access" ON public.conversation_members
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend messages access" ON public.messages;
 CREATE POLICY "Backend messages access" ON public.messages
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend receipts access" ON public.message_receipts;
 CREATE POLICY "Backend receipts access" ON public.message_receipts
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend status stories access" ON public.status_stories;
 CREATE POLICY "Backend status stories access" ON public.status_stories
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend call records access" ON public.call_records;
 CREATE POLICY "Backend call records access" ON public.call_records
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend group tasks access" ON public.group_tasks;
 CREATE POLICY "Backend group tasks access" ON public.group_tasks
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend group notes access" ON public.group_notes;
 CREATE POLICY "Backend group notes access" ON public.group_notes
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend group events access" ON public.group_events;
 CREATE POLICY "Backend group events access" ON public.group_events
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend scheduled messages access" ON public.scheduled_messages;
 CREATE POLICY "Backend scheduled messages access" ON public.scheduled_messages
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- Storage bucket access policies
 DROP POLICY IF EXISTS "Public avatar read" ON storage.objects;
 CREATE POLICY "Public avatar read" ON storage.objects
-  FOR SELECT USING (bucket_id = 'avatars');
+  FOR SELECT TO anon, authenticated USING (bucket_id = 'avatars');
 
 DROP POLICY IF EXISTS "Backend avatar upload" ON storage.objects;
 CREATE POLICY "Backend avatar upload" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'avatars');
+  FOR INSERT TO service_role WITH CHECK (bucket_id = 'avatars');
 
 DROP POLICY IF EXISTS "Public attachment read" ON storage.objects;
 CREATE POLICY "Public attachment read" ON storage.objects
-  FOR SELECT USING (bucket_id = 'attachments');
+  FOR SELECT TO service_role USING (bucket_id = 'attachments');
 
 DROP POLICY IF EXISTS "Backend attachment upload" ON storage.objects;
 CREATE POLICY "Backend attachment upload" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'attachments');
+  FOR INSERT TO service_role WITH CHECK (bucket_id = 'attachments');
 
 -- ============================================================================
 -- 13. AUTOMATED 24-HOUR STATUS CLEANUP FUNCTION
@@ -635,19 +652,19 @@ ALTER TABLE public.user_ringtone_settings ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Backend chat categories access" ON public.chat_categories;
 CREATE POLICY "Backend chat categories access" ON public.chat_categories
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend user chat categories access" ON public.user_chat_categories;
 CREATE POLICY "Backend user chat categories access" ON public.user_chat_categories
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend user chat themes access" ON public.user_chat_themes;
 CREATE POLICY "Backend user chat themes access" ON public.user_chat_themes
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Backend user ringtones access" ON public.user_ringtone_settings;
 CREATE POLICY "Backend user ringtones access" ON public.user_ringtone_settings
-  FOR ALL USING (true) WITH CHECK (true);
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- Group and per-user customization data is accessed through the authenticated
 -- application server, which uses SUPABASE_SERVICE_ROLE_KEY. Deny direct anon
@@ -707,6 +724,23 @@ CREATE TABLE IF NOT EXISTS public.ad_campaigns (
 CREATE INDEX IF NOT EXISTS idx_ad_campaigns_feed ON public.ad_campaigns(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_ad_campaigns_advertiser ON public.ad_campaigns(advertiser_phone, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS public.ad_visit_verifications (
+  id UUID PRIMARY KEY,
+  advertiser_phone TEXT NOT NULL REFERENCES public.users(phone_normalized) ON DELETE CASCADE,
+  submission_id UUID NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ,
+  consumed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (advertiser_phone, submission_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ad_visit_verifications_expiry
+  ON public.ad_visit_verifications(expires_at);
+ALTER TABLE public.ad_visit_verifications ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Backend ad visit verifications access" ON public.ad_visit_verifications;
+CREATE POLICY "Backend ad visit verifications access" ON public.ad_visit_verifications
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 CREATE TABLE IF NOT EXISTS public.ad_events (
   id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
   campaign_id TEXT NOT NULL REFERENCES public.ad_campaigns(id) ON DELETE CASCADE,
@@ -741,5 +775,36 @@ CREATE POLICY "Backend ad events access" ON public.ad_events
 DROP POLICY IF EXISTS "Backend ad reports access" ON public.ad_reports;
 CREATE POLICY "Backend ad reports access" ON public.ad_reports
   FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+REVOKE ALL PRIVILEGES ON TABLE
+  public.users,
+  public.auth_sessions,
+  public.stored_media,
+  public.direct_messages,
+  public.conversations,
+  public.conversation_members,
+  public.messages,
+  public.message_receipts,
+  public.status_stories,
+  public.call_records,
+  public.call_participants,
+  public.group_tasks,
+  public.group_notes,
+  public.group_events,
+  public.scheduled_messages,
+  public.chat_categories,
+  public.user_chat_categories,
+  public.user_chat_themes,
+  public.user_ringtone_settings,
+  public.fcm_devices,
+  public.notification_preferences,
+  public.notification_events,
+  public.ad_campaigns,
+  public.ad_visit_verifications,
+  public.ad_events,
+  public.ad_reports
+FROM PUBLIC, anon, authenticated;
+REVOKE ALL PRIVILEGES ON TABLE storage.objects FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE storage.objects TO anon, authenticated;
 
 NOTIFY pgrst, 'reload schema';

@@ -7,6 +7,8 @@ import type { LookupFunction } from 'node:net';
 
 const MAX_HTML_BYTES = 512 * 1024;
 const REQUEST_TIMEOUT_MS = 4500;
+const PREVIEW_CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_PREVIEW_CACHE_ENTRIES = 256;
 
 export interface LinkPreview {
   url: string;
@@ -15,6 +17,8 @@ export interface LinkPreview {
   image: string | null;
   domain: string;
 }
+
+const previewCache = new Map<string, { preview: LinkPreview; expiresAt: number }>();
 
 function isPublicAddress(address: string): boolean {
   const version = net.isIP(address);
@@ -108,6 +112,39 @@ function getMeta(html: string, property: string): string {
   return '';
 }
 
+export function extractLinkMetadata(html: string, pageUrl: URL): {
+  title: string;
+  description: string;
+  imageUrl: string | null;
+} {
+  const title =
+    getMeta(html, 'og:title') ||
+    getMeta(html, 'twitter:title') ||
+    decodeHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') ||
+    pageUrl.hostname;
+  const description =
+    getMeta(html, 'og:description') ||
+    getMeta(html, 'twitter:description') ||
+    getMeta(html, 'description');
+  const imageValue =
+    getMeta(html, 'og:image') ||
+    getMeta(html, 'og:image:url') ||
+    getMeta(html, 'twitter:image') ||
+    getMeta(html, 'twitter:image:src');
+  if (!imageValue) return { title, description, imageUrl: null };
+  try {
+    const imageUrl = new URL(imageValue, pageUrl);
+    if (imageUrl.protocol === 'http:' && pageUrl.protocol === 'https:') imageUrl.protocol = 'https:';
+    return {
+      title,
+      description,
+      imageUrl: imageUrl.protocol === 'https:' ? imageUrl.href : null,
+    };
+  } catch {
+    return { title, description, imageUrl: null };
+  }
+}
+
 function requestHtml(url: URL, addresses: Array<{ address: string; family: number }>): Promise<{
   statusCode: number;
   headers: http.IncomingHttpHeaders;
@@ -174,6 +211,10 @@ function requestHtml(url: URL, addresses: Array<{ address: string; family: numbe
 
 export async function fetchSafeLinkPreview(input: unknown): Promise<LinkPreview> {
   let url = await validatePublicWebUrl(input);
+  const cacheKey = url.href;
+  const cached = previewCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.preview;
+  if (cached) previewCache.delete(cacheKey);
 
   let response: Awaited<ReturnType<typeof requestHtml>> | null = null;
   for (let redirect = 0; redirect <= 3; redirect += 1) {
@@ -196,26 +237,28 @@ export async function fetchSafeLinkPreview(input: unknown): Promise<LinkPreview>
   ) {
     throw new Error('This website does not provide an HTML preview.');
   }
-  const title = decodeHtml(response.body.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') || url.hostname;
-  const description = getMeta(response.body, 'description') || getMeta(response.body, 'og:description');
-  const imageValue = getMeta(response.body, 'og:image') || getMeta(response.body, 'twitter:image');
+  const metadata = extractLinkMetadata(response.body, url);
   let image: string | null = null;
-  if (imageValue) {
+  if (metadata.imageUrl) {
     try {
-      const imageUrl = new URL(imageValue, url);
-      if (imageUrl.hostname === url.hostname && ['http:', 'https:'].includes(imageUrl.protocol)) {
-        image = imageUrl.href;
-      }
+      await validatePublicWebUrl(metadata.imageUrl, true);
+      image = metadata.imageUrl;
     } catch {
       image = null;
     }
   }
 
-  return {
+  const preview = {
     url: url.href,
-    title: title.slice(0, 180),
-    description: description.slice(0, 300),
+    title: metadata.title.slice(0, 180),
+    description: metadata.description.slice(0, 300),
     image,
     domain: url.hostname,
   };
+  if (previewCache.size >= MAX_PREVIEW_CACHE_ENTRIES) {
+    const oldestKey = previewCache.keys().next().value;
+    if (oldestKey) previewCache.delete(oldestKey);
+  }
+  previewCache.set(cacheKey, { preview, expiresAt: Date.now() + PREVIEW_CACHE_TTL_MS });
+  return preview;
 }

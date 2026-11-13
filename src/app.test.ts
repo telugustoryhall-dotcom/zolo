@@ -25,6 +25,42 @@ describe('ZOLO Backend API Health', () => {
     });
   });
 
+  it('returns a sanitized JSON error for malformed request bodies', async () => {
+    const res = await request(app)
+      .post('/api/nonexistent')
+      .set('Content-Type', 'application/json')
+      .send('{invalid');
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      code: 'INVALID_JSON',
+      error: 'Request body contains invalid JSON.',
+    });
+    expect(res.text).not.toContain('node_modules');
+  });
+
+  it('registers link preview independently of the public client config request', async () => {
+    const res = await request(app).post('/api/links/preview').send({ url: 'https://example.com' });
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('UNAUTHORIZED');
+  });
+
+  it('requires an authenticated session for advertiser verification and publishing', async () => {
+    const start = await request(app)
+      .post('/api/ads/visit-verifications')
+      .send({ submissionId: '4a01df25-8d7e-4863-8021-1971e7a5a31a' });
+    const complete = await request(app)
+      .post('/api/ads/visit-verifications/4a01df25-8d7e-4863-8021-1971e7a5a31a/complete');
+    const cancel = await request(app)
+      .delete('/api/ads/visit-verifications/4a01df25-8d7e-4863-8021-1971e7a5a31a');
+    const publish = await request(app).post('/api/ads/campaigns').send({});
+
+    expect(start.status).toBe(401);
+    expect(complete.status).toBe(401);
+    expect(cancel.status).toBe(401);
+    expect(publish.status).toBe(401);
+  });
+
   it('public config exposes only the Firebase web messaging settings', async () => {
     const res = await request(app).get('/api/config');
     expect(res.status).toBe(200);
