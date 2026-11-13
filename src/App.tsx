@@ -30,6 +30,7 @@ import { ScheduledMessagesModal } from './components/ScheduledMessagesModal';
 import { ZoloPlayModal } from './components/ZoloPlayModal';
 import { AuthScreen } from './components/AuthScreen';
 import { ZoloLogo } from './components/ZoloLogo';
+import { NotificationToastContainer, type AppNotificationItem } from './components/NotificationToast';
 import { sound } from './utils/audio';
 import { getSimulatedReply } from './utils/botReplies';
 import { authApi, buildRealtimeWebSocketUrl } from './utils/authApi';
@@ -45,6 +46,7 @@ import type {
   ZoloPeerProfile,
 } from './types/auth';
 import { getBrowserSupabaseClient } from './lib/supabaseClient.ts';
+import { getFcmRegistrationToken, subscribeToFcmMessages } from './lib/firebase.ts';
 import { Lock, Loader2 } from 'lucide-react';
 
 const THEME_PREF_KEY = 'zolochat_theme_pref';
@@ -368,6 +370,7 @@ export default function App() {
   const [statuses, setStatuses] = useState<StatusStory[]>(INITIAL_STATUSES);
   const [callLogs, setCallLogs] = useState<CallLog[]>(INITIAL_CALLS);
   const [chatCategories, setChatCategories] = useState<ChatCategory[]>([]);
+  const [appNotifications, setAppNotifications] = useState<AppNotificationItem[]>([]);
 
   // Active chat state (null by default so neutral welcome screen shows instead of forced demo contact)
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
@@ -434,6 +437,7 @@ export default function App() {
   const callSignalListenerRef = useRef<((ev: any) => void) | null>(null);
   const userProfileRef = useRef<UserProfile>(userProfile);
   const authUserRef = useRef<AuthenticatedUser | null>(authUser);
+  const seenPushEventsRef = useRef(new Set<string>());
 
   useEffect(() => {
     contactsRef.current = contacts;
@@ -1363,6 +1367,26 @@ export default function App() {
             ws.close();
             return;
           }
+          const launchUrl = new URL(window.location.href);
+          const directCallId = launchUrl.searchParams.get('incomingCallId');
+          const groupCallId = launchUrl.searchParams.get('incomingGroupCallId');
+          const groupId = launchUrl.searchParams.get('incomingGroupId');
+          if (directCallId) {
+            ws.send(JSON.stringify({ type: 'call:pickup', callId: directCallId }));
+            launchUrl.searchParams.delete('incomingCallId');
+          }
+          if (groupCallId && groupId) {
+            ws.send(JSON.stringify({
+              type: 'call:group-pickup',
+              callId: groupCallId,
+              groupId,
+            }));
+            launchUrl.searchParams.delete('incomingGroupCallId');
+            launchUrl.searchParams.delete('incomingGroupId');
+          }
+          if (directCallId || (groupCallId && groupId)) {
+            window.history.replaceState({}, '', launchUrl);
+          }
           // Reconcile state with server on every connect/reconnect
           if (authUserRef.current) {
             void hydrateRealInbox(authUserRef.current);
@@ -1416,6 +1440,134 @@ export default function App() {
       }
     };
   }, [authUser, hydrateRealInbox, sendWsPayload, upsertServerCallRecord]);
+
+  useEffect(() => {
+    if (!authUser || typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+      return;
+    }
+
+    let disposed = false;
+    let unsubscribe: (() => void) | null = null;
+    const handlePushMessage = (payload: import('firebase/messaging').MessagePayload) => {
+      const data = payload.data;
+      if (!data || data.type === 'call-cancel') return;
+      const eventId = data.eventId || `${data.type || 'notification'}:${data.callId || Date.now()}`;
+      if (seenPushEventsRef.current.has(eventId)) return;
+      try {
+        const storageKey = 'zolo_fcm_seen_events';
+        const persisted = JSON.parse(localStorage.getItem(storageKey) || '[]') as unknown;
+        const savedIds = Array.isArray(persisted)
+          ? persisted.filter((value): value is string => typeof value === 'string')
+          : [];
+        if (savedIds.includes(eventId)) return;
+        localStorage.setItem(storageKey, JSON.stringify([...savedIds.slice(-299), eventId]));
+      } catch {
+        // Continue with the in-memory de-duplication set when storage is unavailable.
+      }
+      seenPushEventsRef.current.add(eventId);
+      if (seenPushEventsRef.current.size > 300) {
+        const oldest = seenPushEventsRef.current.values().next().value;
+        if (oldest) seenPushEventsRef.current.delete(oldest);
+      }
+
+      if (data.type === 'incoming-call' && data.callId) {
+        if (activeCallRef.current?.callId === data.callId) return;
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'call:pickup', callId: data.callId }));
+        } else {
+          const launchUrl = new URL(window.location.href);
+          launchUrl.searchParams.set('incomingCallId', data.callId);
+          window.history.replaceState({}, '', launchUrl);
+        }
+        return;
+      }
+      if (data.type === 'incoming-group-call' && data.callId && data.groupId) {
+        if (activeCallRef.current?.callId === data.callId) return;
+        const ws = wsRef.current;
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'call:group-pickup',
+            callId: data.callId,
+            groupId: data.groupId,
+          }));
+        } else {
+          const launchUrl = new URL(window.location.href);
+          launchUrl.searchParams.set('incomingGroupCallId', data.callId);
+          launchUrl.searchParams.set('incomingGroupId', data.groupId);
+          window.history.replaceState({}, '', launchUrl);
+        }
+        return;
+      }
+
+      const conversationId = data.conversationId;
+      if (!conversationId) return;
+      const contact = contactsRef.current.find(
+        (candidate) =>
+          candidate.id === conversationId ||
+          resolveContactPhoneNormalized(candidate) === conversationId
+      );
+      if (!contact || activeContactIdRef.current === contact.id) return;
+      setAppNotifications((previous) => [{
+        id: eventId,
+        type: 'message' as const,
+        title: data.title || contact.name,
+        subtitle: data.body || 'New activity',
+        avatarUrl: contact.avatar || null,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        contactId: contact.id,
+      }, ...previous].slice(0, 4));
+    };
+
+    const refreshRegistration = async () => {
+      try {
+        const token = await getFcmRegistrationToken(false);
+        if (disposed || !token) return;
+        await authApi.registerFcmDevice(token);
+      } catch (error) {
+        console.error('FCM device setup failed:', {
+          message: error instanceof Error ? error.message : 'unknown error',
+        });
+      }
+    };
+    void refreshRegistration().then(async () => {
+      if (disposed) return;
+      try {
+        unsubscribe = await subscribeToFcmMessages(handlePushMessage);
+        if (disposed) unsubscribe?.();
+      } catch (error) {
+        console.error('FCM foreground listener failed:', {
+          message: error instanceof Error ? error.message : 'unknown error',
+        });
+      }
+    });
+
+    const refreshToken = () => {
+      if (document.visibilityState === 'visible') void refreshRegistration();
+    };
+    document.addEventListener('visibilitychange', refreshToken);
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', refreshToken);
+      unsubscribe?.();
+    };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser) return;
+    const launchUrl = new URL(window.location.href);
+    const conversationId = launchUrl.searchParams.get('conversationId');
+    if (!conversationId) return;
+    const contact = contacts.find(
+      (candidate) =>
+        candidate.id === conversationId ||
+        resolveContactPhoneNormalized(candidate) === conversationId
+    );
+    if (!contact) return;
+    setActiveContactId(contact.id);
+    launchUrl.searchParams.delete('conversationId');
+    window.history.replaceState({}, '', launchUrl);
+  }, [authUser, contacts]);
 
   // Keep self contact synchronized when user updates profile name/phone/avatar
   useEffect(() => {
@@ -1537,6 +1689,8 @@ export default function App() {
 
   const handleLoggedOut = () => {
     hydratedRef.current = false;
+    setAppNotifications([]);
+    seenPushEventsRef.current.clear();
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -2821,6 +2975,13 @@ export default function App() {
           theme={userProfile.theme}
         />
       )}
+      <NotificationToastContainer
+        notifications={appNotifications}
+        theme={userProfile.theme}
+        onDismiss={(id) => setAppNotifications((previous) => previous.filter((item) => item.id !== id))}
+        onOpenChat={setActiveContactId}
+        onOpenStatus={(index) => setStatusViewerIndex(index)}
+      />
     </div>
   );
 }

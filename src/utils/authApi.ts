@@ -8,6 +8,7 @@ import type {
   DirectMessageWireDto,
   GroupConversationWireDto,
   GroupMessageWireDto,
+  NotificationPreferences,
   PersistedChatBundle,
   StatusStoryWireDto,
   ZoloPeerProfile,
@@ -430,6 +431,33 @@ export const authApi = {
     participantCount?: number;
   }> {
     return apiFetch(`/api/calls/group-active/${encodeURIComponent(groupId)}`);
+  },
+
+  async getNotificationPreferences(): Promise<{ preferences: NotificationPreferences }> {
+    return apiFetch('/api/notifications/preferences');
+  },
+
+  async updateNotificationPreferences(
+    updates: Partial<NotificationPreferences>
+  ): Promise<{ preferences: NotificationPreferences }> {
+    return apiFetch('/api/notifications/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+
+  async registerFcmDevice(token: string): Promise<void> {
+    await apiFetch('/api/notifications/devices', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
+
+  async unregisterFcmDevice(token: string): Promise<void> {
+    await apiFetch('/api/notifications/devices', {
+      method: 'DELETE',
+      body: JSON.stringify({ token }),
+    });
   },
 
   async listSessions(): Promise<{ sessions: ActiveSessionInfo[] }> {

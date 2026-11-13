@@ -64,6 +64,36 @@ export function getLocalDb(): DatabaseSync {
       CREATE INDEX IF NOT EXISTS idx_local_sessions_token ON local_auth_sessions(token_hash);
     `);
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS local_fcm_devices (
+        token TEXT PRIMARY KEY,
+        phone_normalized TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES local_auth_sessions(session_id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_fcm_devices_phone ON local_fcm_devices(phone_normalized);
+      CREATE INDEX IF NOT EXISTS idx_local_fcm_devices_session ON local_fcm_devices(session_id);
+
+      CREATE TABLE IF NOT EXISTS local_notification_preferences (
+        phone_normalized TEXT PRIMARY KEY,
+        private_messages INTEGER NOT NULL DEFAULT 1,
+        group_messages INTEGER NOT NULL DEFAULT 1,
+        calls INTEGER NOT NULL DEFAULT 1,
+        group_calls INTEGER NOT NULL DEFAULT 1,
+        other_activity INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS local_notification_events (
+        phone_normalized TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(phone_normalized, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_notification_events_created ON local_notification_events(created_at);
+    `);
+
     // 3. Direct Messages table
     db.exec(`
       CREATE TABLE IF NOT EXISTS local_direct_messages (

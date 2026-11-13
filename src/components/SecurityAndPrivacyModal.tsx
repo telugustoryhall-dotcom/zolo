@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Shield,
@@ -18,6 +18,9 @@ import {
   LogOut,
 } from 'lucide-react';
 import type { UserProfile, Contact, Message } from '../types/chat';
+import type { NotificationPreferences } from '../types/auth';
+import { authApi } from '../utils/authApi';
+import { getFcmRegistrationToken } from '../lib/firebase';
 
 interface SecurityAndPrivacyModalProps {
   userProfile: UserProfile;
@@ -48,7 +51,87 @@ export const SecurityAndPrivacyModal: React.FC<SecurityAndPrivacyModalProps> = (
   onUpdateUserProfile,
   onLoggedOut,
 }) => {
-  const [activeTab, setActiveTab] = useState<'privacy' | 'security' | 'disappearing' | 'backup' | 'storage'>('security');
+  const [activeTab, setActiveTab] = useState<'privacy' | 'security' | 'notifications' | 'disappearing' | 'backup' | 'storage'>('security');
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
+    privateMessages: true,
+    groupMessages: true,
+    calls: true,
+    groupCalls: true,
+    otherActivity: true,
+  });
+  const [notificationPermission, setNotificationPermission] = useState(
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+  );
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
+  const [pushConfigurationReady, setPushConfigurationReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    authApi.getNotificationPreferences()
+      .then(({ preferences }) => {
+        if (active) setNotificationPreferences(preferences);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setNotificationError(error instanceof Error ? error.message : 'Could not load notification preferences.');
+        }
+      });
+      fetch('/api/config', { credentials: 'include' })
+        .then(async (response) => {
+          if (!response.ok) throw new Error('Could not inspect push configuration.');
+          return response.json() as Promise<{
+            firebaseMessaging?: { vapidPublicKey?: string; serverConfigured?: boolean };
+          }>;
+        })
+        .then((config) => {
+          if (active) {
+            setPushConfigurationReady(Boolean(
+              config.firebaseMessaging?.vapidPublicKey &&
+              config.firebaseMessaging.serverConfigured
+            ));
+          }
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setNotificationError(error instanceof Error ? error.message : 'Could not inspect push configuration.');
+          }
+        });
+      return () => { active = false; };
+  }, []);
+
+  const updateNotificationPreference = async (key: keyof NotificationPreferences, value: boolean) => {
+    setNotificationsBusy(true);
+    setNotificationError(null);
+    try {
+      const { preferences } = await authApi.updateNotificationPreferences({ [key]: value });
+      setNotificationPreferences(preferences);
+    } catch (error) {
+      setNotificationError(error instanceof Error ? error.message : 'Could not save notification preference.');
+    } finally {
+      setNotificationsBusy(false);
+    }
+  };
+
+  const enablePushNotifications = async () => {
+    setNotificationsBusy(true);
+    setNotificationError(null);
+    try {
+      const token = await getFcmRegistrationToken(true);
+      if (!token) {
+        setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+        setNotificationError('Notification permission was not granted.');
+        return;
+      }
+      await authApi.registerFcmDevice(token);
+      setNotificationPermission('granted');
+    } catch (error) {
+      setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+      setNotificationError(error instanceof Error ? error.message : 'Could not enable push notifications.');
+    } finally {
+      setNotificationsBusy(false);
+    }
+  };
 
   // Privacy states
   const [findability, setFindability] = useState<'everyone' | 'contacts' | 'nobody'>('contacts');
@@ -224,6 +307,17 @@ export const SecurityAndPrivacyModal: React.FC<SecurityAndPrivacyModalProps> = (
             }`}
           >
             Privacy &amp; Discovery
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('notifications')}
+            className={`px-3 py-1.5 rounded-lg shrink-0 transition-all ${
+              activeTab === 'notifications'
+                ? 'bg-[#00a884] text-white shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Notifications
           </button>
           <button
             type="button"
@@ -475,6 +569,61 @@ export const SecurityAndPrivacyModal: React.FC<SecurityAndPrivacyModalProps> = (
                   ))
                 )}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'notifications' && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="font-bold text-sm">Push Notification Settings</h3>
+                <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Choose which activity may notify your registered devices. Message previews stay private.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={enablePushNotifications}
+                disabled={notificationsBusy}
+                className="px-4 py-2 rounded-xl bg-[#00a884] text-white text-xs font-bold disabled:opacity-50"
+              >
+                {notificationPermission === 'granted' ? 'Refresh this device' : 'Enable on this device'}
+              </button>
+              <p className={`text-xs ${notificationPermission === 'denied' ? 'text-amber-400' : 'text-slate-400'}`}>
+                Browser permission: {notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Blocked in browser settings' : notificationPermission === 'unsupported' ? 'Unsupported' : 'Not requested'}
+              </p>
+              {!pushConfigurationReady && (
+                <p className="text-xs text-amber-400">
+                  Push delivery is not fully configured on this server yet. Ask the administrator to configure the Firebase Web Push key and server credentials.
+                </p>
+              )}
+              <div className="space-y-2">
+                {([
+                  ['privateMessages', 'Private messages'],
+                  ['groupMessages', 'Group messages'],
+                  ['calls', 'Incoming and missed private calls'],
+                  ['groupCalls', 'Incoming and missed group calls'],
+                  ['otherActivity', 'Other account activity'],
+                ] as const).map(([key, label]) => (
+                  <label
+                    key={key}
+                    className={`flex items-center justify-between gap-4 p-3 rounded-xl border ${
+                      isDark ? 'border-slate-700/60 bg-[#111b21]' : 'border-slate-200 bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">{label}</span>
+                    <input
+                      type="checkbox"
+                      checked={notificationPreferences[key]}
+                      disabled={notificationsBusy}
+                      onChange={(event) => void updateNotificationPreference(key, event.target.checked)}
+                      className="accent-[#00a884] w-4 h-4"
+                    />
+                  </label>
+                ))}
+              </div>
+              {notificationError && (
+                <p role="alert" className="text-xs text-rose-400">{notificationError}</p>
+              )}
             </div>
           )}
 

@@ -14,6 +14,16 @@ import {
 import { SESSION_COOKIE_NAME } from '../middleware/auth.ts';
 import type { DirectMessageDto, PeerDirectoryProfile } from '../db/messagingRepository.ts';
 import type { GroupConversationWireDto, GroupMessageWireDto } from '../types/auth.ts';
+import { fetchGroupInboxForUser, isGroupMember } from '../db/groupRepository.ts';
+import { cancelCallPushNotification, sendPushNotification } from './fcmService.ts';
+
+function cancelCallNotification(phone: string, callId: string): void {
+  void cancelCallPushNotification(phone, callId).catch((error) => {
+    console.error('Call notification cancellation failed:', {
+      code: error instanceof Error ? error.name : 'unknown',
+    });
+  });
+}
 
 export type ServerRealtimeEvent =
   | {
@@ -223,6 +233,10 @@ type ClientWsInbound =
       sdpOffer: RTCSessionDescriptionInit;
     }
   | {
+      type: 'call:pickup';
+      callId: string;
+    }
+  | {
       type: 'call:answer';
       callId: string;
       toPhone: string;
@@ -258,6 +272,11 @@ type ClientWsInbound =
     }
   | {
       type: 'call:group-join';
+      callId: string;
+      groupId: string;
+    }
+  | {
+      type: 'call:group-pickup';
       callId: string;
       groupId: string;
     }
@@ -309,6 +328,7 @@ interface ActiveCallState {
   startedAtMs: number;
   answeredAtMs: number | null;
   ringTimeout: ReturnType<typeof setTimeout> | null;
+  sdpOffer: RTCSessionDescriptionInit;
 }
 
 export interface ActiveGroupParticipant {
@@ -333,7 +353,29 @@ export interface ActiveGroupCallState {
   status: 'active' | 'ended';
   startedAtMs: number;
   memberPhones: Set<string>;
+  declinedPhones: Set<string>;
+  joinedPhones: Set<string>;
   participants: Map<string, ActiveGroupParticipant>;
+}
+
+async function notifyGroupCallFinished(call: ActiveGroupCallState): Promise<void> {
+  const recipients = Array.from(call.memberPhones).filter((phone) => phone !== call.hostPhone);
+  await Promise.all(recipients.map(async (phone) => {
+    cancelCallNotification(phone, call.callId);
+    if (call.joinedPhones.has(phone) || call.declinedPhones.has(phone)) return;
+    await sendPushNotification(phone, 'groupCalls', {
+      eventId: `missed-group-call:${call.callId}:${phone}`,
+      type: 'missed-call',
+      title: call.groupName,
+      body: `Missed group ${call.callType} call`,
+      conversationId: call.groupId,
+      groupId: call.groupId,
+    }).catch((error) => {
+      console.error('Missed group call notification failed:', {
+        code: error instanceof Error ? error.name : 'unknown',
+      });
+    });
+  }));
 }
 
 function parseCookiesFromHeader(cookieHeader?: string): Record<string, string> {
@@ -573,6 +615,20 @@ class RealtimeHub {
           : 0;
         const outcome: CallRecordWireDto['outcome'] =
           ongoing.status === 'answered' ? 'answered' : 'missed';
+        cancelCallNotification(ongoing.calleePhone, ongoing.callId);
+        if (outcome === 'missed') {
+          void sendPushNotification(ongoing.calleePhone, 'calls', {
+            eventId: `missed-call:${ongoing.callId}`,
+            type: 'missed-call',
+            title: 'Missed call',
+            body: `Missed ${ongoing.callType} call`,
+            conversationId: ongoing.callerPhone,
+          }).catch((error) => {
+            console.error('Missed call notification failed:', {
+              code: error instanceof Error ? error.name : 'unknown',
+            });
+          });
+        }
 
         finalizeCallRecordInDb({
           callId: ongoing.callId,
@@ -615,6 +671,11 @@ class RealtimeHub {
 
         if (ongoingGroupCall.participants.size === 0) {
           this.clearGroupCall(ongoingGroupCall.callId);
+          void notifyGroupCallFinished(ongoingGroupCall).catch((error) => {
+            console.error('Group call notification cleanup failed:', {
+              code: error instanceof Error ? error.name : 'unknown',
+            });
+          });
           finalizeCallRecordInDb({
             callId: ongoingGroupCall.callId,
             outcome: 'answered',
@@ -755,6 +816,18 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                   durationSeconds: 0,
                 })
                   .then((missedLog) => {
+                    cancelCallNotification(targetPhone, callId);
+                    void sendPushNotification(targetPhone, 'calls', {
+                      eventId: `missed-call:${callId}`,
+                      type: 'missed-call',
+                      title: currentUser.fullName,
+                      body: `Missed ${callType} call`,
+                      conversationId: userPhone,
+                    }).catch((error) => {
+                      console.error('Missed call notification failed:', {
+                        code: error instanceof Error ? error.name : 'unknown',
+                      });
+                    });
                     realtimeHub.sendToPhone(userPhone, {
                       type: 'call:ended',
                       callId,
@@ -784,6 +857,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 startedAtMs: Date.now(),
                 answeredAtMs: null,
                 ringTimeout,
+                sdpOffer: parsed.sdpOffer,
               });
 
               // Notify caller that callee device is ringing (or offline ringing)
@@ -805,6 +879,43 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                   timestampRaw: Date.now(),
                 });
               }
+              void sendPushNotification(targetPhone, 'calls', {
+                eventId: `incoming-call:${callId}`,
+                type: 'incoming-call',
+                title: currentUser.fullName,
+                body: `Incoming ${callType} call`,
+                callId,
+                callType,
+                callerName: currentUser.fullName,
+                callerAvatar: currentUser.avatarUrl ?? '',
+              }).catch((error) => {
+                console.error('Incoming call notification failed:', {
+                  code: error instanceof Error ? error.name : 'unknown',
+                });
+              });
+              return;
+            }
+
+            if (parsed.type === 'call:pickup') {
+              const callId = String(parsed.callId || '').trim();
+              const callState = realtimeHub.getCall(callId);
+              if (
+                !callState ||
+                callState.calleePhone !== userPhone ||
+                callState.status !== 'ringing'
+              ) return;
+              const callerProfiles = await lookupRegisteredUsersByPhones([callState.callerPhone]);
+              const callerProfile = callerProfiles[0];
+              realtimeHub.sendToPhone(userPhone, {
+                type: 'call:incoming',
+                callId: callState.callId,
+                callerPhone: callState.callerPhone,
+                callerName: callerProfile?.fullName || callState.callerPhone,
+                callerAvatar: callerProfile?.avatarUrl ?? null,
+                callType: callState.callType,
+                sdpOffer: callState.sdpOffer,
+                timestampRaw: callState.startedAtMs,
+              });
               return;
             }
 
@@ -822,6 +933,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 callState.status = 'answered';
                 callState.answeredAtMs = Date.now();
               }
+              cancelCallNotification(userPhone, callId);
 
               await markCallAnsweredInDb(callId).catch(() => {});
 
@@ -855,6 +967,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
               if (!targetPhone || !callId) return;
 
               realtimeHub.clearCall(callId);
+              cancelCallNotification(userPhone, callId);
               const savedLog = await finalizeCallRecordInDb({
                 callId,
                 outcome: reason,
@@ -883,6 +996,8 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
               if (!targetPhone || !callId) return;
 
               const tracked = realtimeHub.clearCall(callId);
+              cancelCallNotification(userPhone, callId);
+              cancelCallNotification(targetPhone, callId);
               const serverMeasuredDuration = tracked?.answeredAtMs
                 ? Math.max(1, Math.round((Date.now() - tracked.answeredAtMs) / 1000))
                 : 0;
@@ -924,17 +1039,21 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
             if (parsed.type === 'call:group-start') {
               const callId = String(parsed.callId || '').trim();
               const groupId = String(parsed.groupId || '').trim();
-              const groupName = String(parsed.groupName || groupId).trim();
+              let groupName = String(parsed.groupName || groupId).trim();
               const callType = parsed.callType === 'video' ? 'video' : 'audio';
-              const rawMemberPhones = Array.isArray(parsed.memberPhones) ? parsed.memberPhones : [];
-              const memberPhones = rawMemberPhones.map((p) => String(p).trim()).filter(Boolean);
-
               if (!callId || !groupId) return;
+              const inbox = await fetchGroupInboxForUser(userPhone);
+              const group = inbox.groups.find((item) => item.id === groupId);
+              if (!group || !(await isGroupMember(groupId, userPhone))) return;
+              groupName = group.name;
+              const groupAvatar = group.avatarUrl;
+              const memberPhones = group.memberPhones;
 
               // Check if another group call is already active for this group
               const existingCall = realtimeHub.getActiveGroupCallForGroup(groupId);
               if (existingCall) {
                 if (!existingCall.participants.has(userPhone)) {
+                  existingCall.joinedPhones.add(userPhone);
                   existingCall.participants.set(userPhone, {
                     phone: userPhone,
                     name: currentUser.fullName,
@@ -971,7 +1090,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 callId,
                 groupId,
                 groupName,
-                groupAvatar: parsed.groupAvatar ?? null,
+                groupAvatar,
                 hostPhone: userPhone,
                 hostName: currentUser.fullName,
                 hostAvatar: currentUser.avatarUrl ?? null,
@@ -979,6 +1098,8 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 status: 'active',
                 startedAtMs: Date.now(),
                 memberPhones: new Set(memberPhones),
+                declinedPhones: new Set(),
+                joinedPhones: new Set([userPhone]),
                 participants: new Map([
                   [
                     userPhone,
@@ -997,18 +1118,32 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
 
               realtimeHub.setGroupCall(newGroupCall);
 
-              // Persist in DB
-              createGroupCallRecordInDb({
-                callId,
-                groupId,
-                groupName,
-                groupAvatar: parsed.groupAvatar ?? null,
-                callerPhone: userPhone,
-                callerName: currentUser.fullName,
-                callerAvatar: currentUser.avatarUrl ?? null,
-                callType,
-                memberPhones,
-              }).catch(() => {});
+              try {
+                await createGroupCallRecordInDb({
+                  callId,
+                  groupId,
+                  groupName,
+                  groupAvatar,
+                  callerPhone: userPhone,
+                  callerName: currentUser.fullName,
+                  callerAvatar: currentUser.avatarUrl ?? null,
+                  callType,
+                  memberPhones,
+                });
+              } catch (error) {
+                realtimeHub.clearGroupCall(callId);
+                console.error('Group call session creation failed:', {
+                  code: error instanceof Error ? error.name : 'unknown',
+                });
+                realtimeHub.sendToPhone(userPhone, {
+                  type: 'call:group-ended',
+                  callId,
+                  byPhone: 'server',
+                  reason: 'all_left',
+                  durationSeconds: 0,
+                });
+                return;
+              }
 
               // Confirm joined for the host
               realtimeHub.sendToPhone(userPhone, {
@@ -1028,7 +1163,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                   callId,
                   groupId,
                   groupName,
-                  groupAvatar: parsed.groupAvatar ?? null,
+                  groupAvatar,
                   callerPhone: userPhone,
                   callerName: currentUser.fullName,
                   callerAvatar: currentUser.avatarUrl ?? null,
@@ -1036,7 +1171,50 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                   timestampRaw: Date.now(),
                   memberPhones,
                 });
+                void sendPushNotification(memberPhone, 'groupCalls', {
+                  eventId: `incoming-group-call:${callId}`,
+                  type: 'incoming-group-call',
+                  title: groupName,
+                  body: `${currentUser.fullName} started a group ${callType} call`,
+                  callId,
+                  groupId,
+                  groupName,
+                  groupAvatar: groupAvatar || '',
+                  callType,
+                  callerName: currentUser.fullName,
+                  callerAvatar: currentUser.avatarUrl ?? '',
+                }).catch((error) => {
+                  console.error('Incoming group call notification failed:', {
+                    code: error instanceof Error ? error.name : 'unknown',
+                  });
+                });
               }
+              return;
+            }
+
+            if (parsed.type === 'call:group-pickup') {
+              const callId = String(parsed.callId || '').trim();
+              const groupId = String(parsed.groupId || '').trim();
+              const groupCall = realtimeHub.getActiveGroupCall(callId);
+              if (
+                !groupCall ||
+                groupCall.groupId !== groupId ||
+                !groupCall.memberPhones.has(userPhone) ||
+                !(await isGroupMember(groupId, userPhone))
+              ) return;
+              realtimeHub.sendToPhone(userPhone, {
+                type: 'call:group-incoming',
+                callId: groupCall.callId,
+                groupId: groupCall.groupId,
+                groupName: groupCall.groupName,
+                groupAvatar: groupCall.groupAvatar,
+                callerPhone: groupCall.hostPhone,
+                callerName: groupCall.hostName,
+                callerAvatar: groupCall.hostAvatar,
+                callType: groupCall.callType,
+                timestampRaw: groupCall.startedAtMs,
+                memberPhones: Array.from(groupCall.memberPhones),
+              });
               return;
             }
 
@@ -1044,6 +1222,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
               const callId = String(parsed.callId || '').trim();
               const groupId = String(parsed.groupId || '').trim();
               if (!callId) return;
+              if (!groupId || !(await isGroupMember(groupId, userPhone))) return;
 
               let groupCall = realtimeHub.getActiveGroupCall(callId);
               if (!groupCall && groupId) {
@@ -1060,6 +1239,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 });
                 return;
               }
+              cancelCallNotification(userPhone, callId);
 
               const newParticipant: ActiveGroupParticipant = {
                 phone: userPhone,
@@ -1071,6 +1251,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 isVideoOff: false,
               };
 
+              groupCall.joinedPhones.add(userPhone);
               groupCall.participants.set(userPhone, newParticipant);
 
               await updateCallParticipantStatusInDb({
@@ -1176,6 +1357,8 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
             if (parsed.type === 'call:group-reject') {
               const callId = String(parsed.callId || '').trim();
               if (callId) {
+                realtimeHub.getActiveGroupCall(callId)?.declinedPhones.add(userPhone);
+                cancelCallNotification(userPhone, callId);
                 updateCallParticipantStatusInDb({
                   callId,
                   userPhone,
@@ -1209,6 +1392,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
                 // If everyone has left the call, finalize the group call record
                 if (groupCall.participants.size === 0) {
                   realtimeHub.clearGroupCall(callId);
+                  await notifyGroupCallFinished(groupCall);
                   const durationSecs = Math.max(
                     1,
                     Math.round((Date.now() - groupCall.startedAtMs) / 1000)
@@ -1227,6 +1411,8 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
               const callId = String(parsed.callId || '').trim();
               if (!callId) return;
 
+              const activeGroupCall = realtimeHub.getActiveGroupCall(callId);
+              if (!activeGroupCall || activeGroupCall.hostPhone !== userPhone) return;
               const groupCall = realtimeHub.clearGroupCall(callId);
               const durationSecs = groupCall
                 ? Math.max(1, Math.round((Date.now() - groupCall.startedAtMs) / 1000))
@@ -1239,6 +1425,7 @@ export function attachRealtimeHub(httpServer: HttpServer): WebSocketServer {
               }).catch(() => null);
 
               if (groupCall) {
+                await notifyGroupCallFinished(groupCall);
                 realtimeHub.broadcastToGroupCall(callId, {
                   type: 'call:group-ended',
                   callId,

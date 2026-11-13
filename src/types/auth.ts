@@ -55,6 +55,14 @@ export interface ActiveSessionInfo {
   isCurrent: boolean;
 }
 
+export interface NotificationPreferences {
+  privateMessages: boolean;
+  groupMessages: boolean;
+  calls: boolean;
+  groupCalls: boolean;
+  otherActivity: boolean;
+}
+
 export interface ApiErrorShape {
   code?: string;
   error: string;

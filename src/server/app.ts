@@ -115,6 +115,20 @@ import {
   updateAdCampaign,
 } from '../db/adsRepository.ts';
 import type { AdCreativeInput, AdStatus } from '../types/ads.ts';
+import firebaseWebConfig from '../../firebase-applet-config.json' with { type: 'json' };
+import {
+  getNotificationPreferences,
+  isFcmServerConfigured,
+  getVapidPublicKey,
+  moveNotificationPreferences,
+  registerFcmDevice,
+  saveNotificationPreferences,
+  sendPushNotification,
+  unregisterFcmDevice,
+  unregisterSessionFcmDevices,
+  unregisterUserFcmDevices,
+  type NotificationPreferences,
+} from './fcmService.ts';
 
 export interface CreateAppOptions {
   disableRateLimit?: boolean;
@@ -359,7 +373,140 @@ export function createApp(options: CreateAppOptions = {}) {
       googleMapsApiKey,
       iceServers,
       hasTurn: turnUrls.length > 0,
+      firebaseMessaging: {
+        config: {
+          apiKey: firebaseWebConfig.apiKey,
+          authDomain: firebaseWebConfig.authDomain,
+          projectId: firebaseWebConfig.projectId,
+          messagingSenderId: firebaseWebConfig.messagingSenderId,
+          appId: firebaseWebConfig.appId,
+        },
+        vapidPublicKey: getVapidPublicKey(),
+        serverConfigured: isFcmServerConfigured(),
+      },
     });
+  });
+
+  app.get('/firebase-messaging-sw.js', (_req: Request, res: Response) => {
+    const config = JSON.stringify({
+      apiKey: firebaseWebConfig.apiKey,
+      authDomain: firebaseWebConfig.authDomain,
+      projectId: firebaseWebConfig.projectId,
+      messagingSenderId: firebaseWebConfig.messagingSenderId,
+      appId: firebaseWebConfig.appId,
+    });
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(`
+      importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
+      importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
+      firebase.initializeApp(${config});
+      const messaging = firebase.messaging();
+      messaging.onBackgroundMessage(({ data = {} }) => {
+        if (data.type === 'call-cancel') {
+          return self.registration.getNotifications().then((notifications) => {
+            notifications
+              .filter((notification) => notification.data?.callId === data.callId)
+              .forEach((notification) => notification.close());
+          });
+        }
+        const title = data.title || 'ZOLO';
+        const body = data.body || 'You have a new notification.';
+        return self.registration.showNotification(title, {
+          body,
+          tag: data.callId ? 'call:' + data.callId : data.eventId || 'zolo-notification',
+          icon: data.callerAvatar || undefined,
+          data,
+          renotify: false
+        });
+      });
+      self.addEventListener('notificationclick', (event) => {
+        event.notification.close();
+        const data = event.notification.data || {};
+        const target = new URL('/', self.location.origin);
+        if (data.callId) {
+          target.searchParams.set(data.groupId ? 'incomingGroupCallId' : 'incomingCallId', data.callId);
+          if (data.groupId) target.searchParams.set('incomingGroupId', data.groupId);
+        } else if (data.conversationId) {
+          target.searchParams.set('conversationId', data.conversationId);
+        }
+        event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+          const existing = windows.find((client) => new URL(client.url).origin === self.location.origin);
+          if (existing) {
+            existing.navigate(target.href);
+            return existing.focus();
+          }
+          return self.clients.openWindow(target.href);
+        }));
+      });
+    `);
+  });
+
+  app.get('/api/notifications/preferences', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      res.json({ preferences: await getNotificationPreferences(req.authUser!.phoneNormalized) });
+    } catch (error) {
+      console.error('Notification preference fetch failed:', error);
+      res.status(500).json({ code: 'NOTIFICATION_PREFERENCES_FAILED', error: 'Could not load notification preferences.' });
+    }
+  });
+
+  app.put('/api/notifications/preferences', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const allowedKeys: (keyof NotificationPreferences)[] = [
+      'privateMessages', 'groupMessages', 'calls', 'groupCalls', 'otherActivity',
+    ];
+    const updates: Partial<NotificationPreferences> = {};
+    for (const key of allowedKeys) {
+      if (req.body?.[key] !== undefined) {
+        if (typeof req.body[key] !== 'boolean') {
+          res.status(400).json({ code: 'INVALID_NOTIFICATION_PREFERENCES', error: 'Notification preferences must be boolean values.' });
+          return;
+        }
+        updates[key] = req.body[key];
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ code: 'INVALID_NOTIFICATION_PREFERENCES', error: 'At least one notification preference is required.' });
+      return;
+    }
+    try {
+      res.json({
+        preferences: await saveNotificationPreferences(req.authUser!.phoneNormalized, updates),
+      });
+    } catch (error) {
+      console.error('Notification preference save failed:', error);
+      res.status(500).json({ code: 'NOTIFICATION_PREFERENCES_FAILED', error: 'Could not save notification preferences.' });
+    }
+  });
+
+  app.post('/api/notifications/devices', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (token.length < 32 || token.length > 4096) {
+      res.status(400).json({ code: 'INVALID_FCM_TOKEN', error: 'The notification device token is invalid.' });
+      return;
+    }
+    try {
+      await registerFcmDevice(req.authUser!.phoneNormalized, req.authSession!.sessionId, token);
+      res.status(201).json({ registered: true });
+    } catch (error) {
+      console.error('FCM device registration failed:', error);
+      res.status(500).json({ code: 'FCM_DEVICE_REGISTER_FAILED', error: 'Could not register this notification device.' });
+    }
+  });
+
+  app.delete('/api/notifications/devices', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!token || token.length > 4096) {
+      res.status(400).json({ code: 'INVALID_FCM_TOKEN', error: 'The notification device token is invalid.' });
+      return;
+    }
+    try {
+      await unregisterFcmDevice(req.authUser!.phoneNormalized, req.authSession!.sessionId, token);
+      res.json({ removed: true });
+    } catch (error) {
+      console.error('FCM device removal failed:', error);
+      res.status(500).json({ code: 'FCM_DEVICE_REMOVE_FAILED', error: 'Could not remove this notification device.' });
+    }
   });
 
   // 2. Upload Profile Picture
@@ -776,6 +923,13 @@ export function createApp(options: CreateAppOptions = {}) {
         userAgent: req.headers['user-agent'],
         ipAddress: req.ip,
       });
+      try {
+        await moveNotificationPreferences(oldNorm.e164, newNorm.e164);
+      } catch (error) {
+        console.error('Notification preference transfer during recovery failed:', {
+          code: error instanceof Error ? error.name : 'unknown',
+        });
+      }
 
       setSessionCookie(req, res, rawSessionToken);
 
@@ -883,6 +1037,13 @@ export function createApp(options: CreateAppOptions = {}) {
           newPhoneNormalized: normalized.e164,
           newCountryCode: normalized.countryCallingCode || dialCode,
         });
+        try {
+          await moveNotificationPreferences(req.authUser!.phoneNormalized, normalized.e164);
+        } catch (error) {
+          console.error('Notification preference transfer during phone change failed:', {
+            code: error instanceof Error ? error.name : 'unknown',
+          });
+        }
 
         res.json({ user: toPublicUser(updatedUser) });
       } catch (error: unknown) {
@@ -1307,6 +1468,20 @@ export function createApp(options: CreateAppOptions = {}) {
         memberPhones: requestedPhones,
       });
       realtimeHub.sendToPhones(group.memberPhones, { type: 'group:created', group });
+      void Promise.all(group.memberPhones
+        .filter((memberPhone) => memberPhone !== req.authUser!.phoneNormalized)
+        .map((memberPhone) => sendPushNotification(memberPhone, 'otherActivity', {
+          eventId: `group-invitation:${group.id}`,
+          type: 'group-invitation',
+          title: 'Group invitation',
+          body: `You were added to ${group.name}`,
+          conversationId: group.id,
+          groupId: group.id,
+        }).catch((error) => {
+          console.error('Group invitation notification failed:', {
+            code: error instanceof Error ? error.name : 'unknown',
+          });
+        })));
       res.status(201).json({ group });
     } catch (error) {
       console.error('Error in POST /api/groups:', error);
@@ -1358,6 +1533,22 @@ export function createApp(options: CreateAppOptions = {}) {
           return;
         }
         realtimeHub.sendToPhones(group.memberPhones, { type: 'group:message', message });
+        await Promise.all(group.memberPhones
+          .filter((memberPhone) => memberPhone !== sender.phoneNormalized)
+          .map((memberPhone) => sendPushNotification(memberPhone, 'groupMessages', {
+            eventId: `group-message:${message.messageId}`,
+            type: 'group-message',
+            title: group.name,
+            body: message.mediaType === 'text'
+              ? `${message.senderName}: New message`
+              : `${message.senderName} sent a ${message.mediaType} message`,
+            conversationId: groupId,
+            groupId,
+          }).catch((error) => {
+            console.error('Group message notification failed:', {
+              code: error instanceof Error ? error.name : 'unknown',
+            });
+          })));
         res.status(201).json({ message });
       } catch (error) {
         console.error('Error in POST /api/groups/:groupId/messages:', error);
@@ -1445,6 +1636,19 @@ export function createApp(options: CreateAppOptions = {}) {
             type: 'message:new',
             message: savedMessage,
             senderProfile,
+          });
+          void sendPushNotification(targetPhone, 'privateMessages', {
+            eventId: `private-message:${savedMessage.messageId}`,
+            type: 'private-message',
+            title: sender.fullName,
+            body: savedMessage.mediaType === 'text'
+              ? 'New message'
+              : `New ${savedMessage.mediaType} message`,
+            conversationId: sender.phoneNormalized,
+          }).catch((error) => {
+            console.error('Private message notification failed:', {
+              code: error instanceof Error ? error.name : 'unknown',
+            });
           });
         }
 
@@ -1889,7 +2093,14 @@ export function createApp(options: CreateAppOptions = {}) {
     requireSessionAuth,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        await revokeSingleSession(req.authSession!.sessionId, req.authUser!.id);
+      try {
+        await unregisterSessionFcmDevices(req.authSession!.sessionId);
+      } catch (error) {
+        console.error('FCM device cleanup during logout failed:', {
+          code: error instanceof Error ? error.name : 'unknown',
+        });
+      }
+      await revokeSingleSession(req.authSession!.sessionId, req.authUser!.id);
         clearSessionCookie(req, res);
         res.json({ loggedOut: true });
       } catch {
@@ -1904,7 +2115,14 @@ export function createApp(options: CreateAppOptions = {}) {
     requireSessionAuth,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const revokedCount = await revokeAllSessionsForUser(req.authUser!.id);
+      try {
+        await unregisterUserFcmDevices(req.authUser!.phoneNormalized);
+      } catch (error) {
+        console.error('FCM device cleanup during global logout failed:', {
+          code: error instanceof Error ? error.name : 'unknown',
+        });
+      }
+      const revokedCount = await revokeAllSessionsForUser(req.authUser!.id);
         clearSessionCookie(req, res);
         res.json({ loggedOut: true, revokedCount });
       } catch {
@@ -1929,6 +2147,13 @@ export function createApp(options: CreateAppOptions = {}) {
             error: 'Type DELETE to confirm permanent account removal.',
           });
           return;
+        }
+        try {
+          await unregisterUserFcmDevices(req.authUser!.phoneNormalized);
+        } catch (error) {
+          console.error('FCM device cleanup during account deletion failed:', {
+            code: error instanceof Error ? error.name : 'unknown',
+          });
         }
         await permanentlyDeleteAccount(req.authUser!.id);
         clearSessionCookie(req, res);

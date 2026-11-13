@@ -4,6 +4,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -82,6 +83,43 @@ export const authSessions = pgTable(
     index('auth_sessions_user_id_idx').on(table.userId),
     index('auth_sessions_token_hash_idx').on(table.tokenHash),
   ]
+);
+
+export const fcmDevices = pgTable(
+  'fcm_devices',
+  {
+    token: text('token').primaryKey(),
+    phoneNormalized: text('phone_normalized').notNull(),
+    sessionId: text('session_id')
+      .references(() => authSessions.sessionId, { onDelete: 'cascade' })
+      .notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('fcm_devices_phone_idx').on(table.phoneNormalized),
+    index('fcm_devices_session_idx').on(table.sessionId),
+  ]
+);
+
+export const notificationPreferences = pgTable('notification_preferences', {
+  phoneNormalized: text('phone_normalized').primaryKey(),
+  privateMessages: boolean('private_messages').notNull().default(true),
+  groupMessages: boolean('group_messages').notNull().default(true),
+  calls: boolean('calls').notNull().default(true),
+  groupCalls: boolean('group_calls').notNull().default(true),
+  otherActivity: boolean('other_activity').notNull().default(true),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const notificationEvents = pgTable(
+  'notification_events',
+  {
+    phoneNormalized: text('phone_normalized').notNull(),
+    eventId: text('event_id').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.phoneNormalized, table.eventId] })]
 );
 
 export const storedMedia = pgTable('stored_media', {

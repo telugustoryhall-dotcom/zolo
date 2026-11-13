@@ -408,6 +408,44 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.call_participants;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.group_tasks;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.group_notes;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.group_events;
+
+-- ==================================================================
+-- 12. FCM DEVICE TOKENS AND ACCOUNT NOTIFICATION PREFERENCES
+-- Backend service-role access only; never grant browser clients access.
+-- ==================================================================
+CREATE TABLE IF NOT EXISTS public.fcm_devices (
+  token TEXT PRIMARY KEY,
+  phone_normalized TEXT NOT NULL,
+  session_id TEXT NOT NULL REFERENCES public.auth_sessions(session_id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fcm_devices_phone ON public.fcm_devices (phone_normalized);
+CREATE INDEX IF NOT EXISTS idx_fcm_devices_session ON public.fcm_devices (session_id);
+ALTER TABLE public.fcm_devices ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.fcm_devices FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.notification_preferences (
+  phone_normalized TEXT PRIMARY KEY,
+  private_messages BOOLEAN NOT NULL DEFAULT TRUE,
+  group_messages BOOLEAN NOT NULL DEFAULT TRUE,
+  calls BOOLEAN NOT NULL DEFAULT TRUE,
+  group_calls BOOLEAN NOT NULL DEFAULT TRUE,
+  other_activity BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE public.notification_preferences ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.notification_preferences FROM anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.notification_events (
+  phone_normalized TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (phone_normalized, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notification_events_created ON public.notification_events (created_at);
+ALTER TABLE public.notification_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.notification_events FROM anon, authenticated;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.scheduled_messages;
 
 -- ============================================================================

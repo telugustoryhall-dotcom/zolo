@@ -19,6 +19,24 @@ View your app in AI Studio: https://ai.studio/apps/2082a314-4d97-411a-813d-6d0c8
 3. Run the app:
    `npm run dev`
 
+## Firebase Cloud Messaging
+
+The web Firebase application is already configured in `firebase-applet-config.json` and is reused by the client and server. The web API key and app identifiers in that file are public Firebase client configuration; do not put Firebase Admin service-account keys there.
+
+To enable real push delivery:
+
+1. In Firebase Console, select the project matching the existing `projectId` in `firebase-applet-config.json` (or replace that file with the values for the intended project).
+2. In **Project settings → General → Your apps**, register the ZOLO web app if it is not already registered. Keep its web app configuration in `firebase-applet-config.json`.
+3. In **Messaging**, enable Firebase Cloud Messaging for the project and create a Web Push certificate/key pair. Set the **public** key as `FCM_VAPID_PUBLIC_KEY` on the server. Do not put a VAPID private key in the frontend.
+4. Create a Firebase Admin service account for the same project. Set its full JSON key as the server-only `FIREBASE_SERVICE_ACCOUNT_JSON` secret, or use `FIREBASE_SERVICE_ACCOUNT_BASE64` / Google Application Default Credentials. Never commit or expose this credential, and do not use a client `VITE_` variable for it.
+5. Apply the FCM tables at the end of `supabase_schema.sql` to the configured Supabase project. The server requires service-role access for these tables; the migration denies browser-role access. If using the direct PostgreSQL (`SQL_HOST`) adapter instead of Supabase, create the same `fcm_devices`, `notification_preferences`, and `notification_events` tables from that migration; the app does not auto-run PostgreSQL migrations. For local-only development the server creates equivalent SQLite tables automatically.
+6. Configure `FCM_VAPID_PUBLIC_KEY` and `FIREBASE_SERVICE_ACCOUNT_JSON` in the production host's secret environment (including Render's environment settings). Deploy over HTTPS; Web Push and service workers do not work on ordinary insecure origins.
+7. Open ZOLO on each device, sign in, and enable device notifications under **Security & Privacy → Notifications**. Grant browser permission from that user gesture. Preferences are stored on the account and remain disabled when turned off.
+
+The server generates `/firebase-messaging-sw.js` from the existing public Firebase app configuration. It does not contain Admin credentials. Push content uses generic message descriptions rather than message text. Call invitations contain only the metadata needed to recover an active WebRTC call; FCM is not used for media transport.
+
+After deployment, validate with two separate accounts and devices: enable notifications on the receiving account; send private and group messages; start audio and video private and group calls; check foreground and background delivery, notification-click navigation, reject/accept, missed-call state, permission-denied behavior, logout/account switching, and stale-token cleanup. Also verify retries do not duplicate user-visible events. Firebase Console's delivery acceptance is not evidence that a person saw a notification. A real multi-account/device delivery test requires the Firebase VAPID key, Admin credentials, HTTPS deployment, and test accounts/devices; those external prerequisites are not available in a local code-only test.
+
 ## Media, links, wallpapers, and ZOLO Ads
 
 - Shared media cards provide filename-preserving download/share actions. Downloads use browser APIs; mobile browsers may require the user to choose a save location and do not necessarily save into Photos/Gallery.
