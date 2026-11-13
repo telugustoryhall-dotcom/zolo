@@ -99,7 +99,12 @@ async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
 
   let response: Response;
   try {
-    const maxAttempts = method === 'GET' || method === 'HEAD' ? 3 : 1;
+    const canRetry = method === 'GET' || method === 'HEAD';
+    const maxAttempts = canRetry ? 6 : 1;
+    const retryDelay = (attempt: number) =>
+      new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, Math.min(800 * 2 ** attempt, 5000));
+      });
     for (let attempt = 0; ; attempt += 1) {
       try {
         response = await fetch(requestUrl, {
@@ -107,12 +112,17 @@ async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
           headers,
           credentials: 'include',
         });
-        break;
       } catch (error) {
         const aborted = error instanceof Error && error.name === 'AbortError';
         if (aborted || attempt + 1 >= maxAttempts) throw error;
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 300 * (attempt + 1)));
+        await retryDelay(attempt);
+        continue;
       }
+
+      const retryableStatus = response.status === 502 || response.status === 503 || response.status === 504;
+      if (!canRetry || !retryableStatus || attempt + 1 >= maxAttempts) break;
+      await response.body?.cancel();
+      await retryDelay(attempt);
     }
   } catch {
     throw new AuthApiClientError({

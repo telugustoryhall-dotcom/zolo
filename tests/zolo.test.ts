@@ -95,16 +95,41 @@ describe('Message links and preview safety', () => {
       }
     });
 
+    it('retries temporary gateway errors for safe Ads reads', async () => {
+      vi.useFakeTimers();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response('temporarily unavailable', { status: 503 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ campaigns: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const requestPromise = authApi.listAdCampaigns();
+        await vi.runAllTimersAsync();
+        await expect(requestPromise).resolves.toEqual({ campaigns: [] });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('returns an actionable API-origin error after network retries fail', async () => {
+      vi.useFakeTimers();
       const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'));
       vi.stubGlobal('fetch', fetchMock);
       try {
-        await expect(authApi.listAdCampaigns()).rejects.toMatchObject({
+        const requestPromise = authApi.listAdCampaigns();
+        const requestExpectation = expect(requestPromise).rejects.toMatchObject({
           code: 'NETWORK_ERROR',
           status: 0,
         } satisfies Partial<AuthApiClientError>);
-        expect(fetchMock).toHaveBeenCalledTimes(3);
+        await vi.runAllTimersAsync();
+        await requestExpectation;
+        expect(fetchMock).toHaveBeenCalledTimes(6);
       } finally {
+        vi.useRealTimers();
         vi.unstubAllGlobals();
       }
     });
