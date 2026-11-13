@@ -5,7 +5,7 @@ import {
   Pin, BellOff, Archive, Check, CheckCheck, Sun, Moon, Volume2, VolumeX,
   User, Shield, CornerDownRight, RotateCcw, CheckCircle2, ChevronRight,
   Filter, MoreVertical, PhoneCall, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed, X, Camera, Loader2, LogOut,
-  Gamepad2
+  Gamepad2, UsersRound
 } from 'lucide-react';
 import { AvatarPickerModal } from './AvatarPickerModal';
 import { ZoloLogo } from './ZoloLogo';
@@ -49,7 +49,7 @@ interface SidebarProps {
   onOpenAds?: () => void;
 }
 
-export type SidebarTabType = 'chats' | 'status' | 'calls' | 'starred' | 'archived' | 'settings';
+export type SidebarTabType = 'chats' | 'status' | 'communities' | 'calls' | 'starred' | 'archived' | 'settings';
 type ChatFilterType = string;
 type CallFilterType = 'all' | 'missed';
 
@@ -316,6 +316,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {totalUnreadCount}
               </span>
             )}
+          </button>
+
+          {/* Communities Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('communities')}
+            className={`relative rounded-xl p-2.5 transition-all ${
+              activeTab === 'communities'
+                ? isDark
+                  ? 'bg-slate-700/60 text-[#00a884]'
+                  : 'bg-slate-200 text-[#008069]'
+                : 'text-slate-400 hover:bg-slate-700/20'
+            }`}
+            title="Communities"
+            aria-label="Communities"
+          >
+            <UsersRound className="h-5 w-5" />
           </button>
 
           {/* Status Tab */}
@@ -871,6 +888,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   );
                 })
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'communities' && (
+          <div className="flex h-full flex-col overflow-hidden">
+            <div className={`border-b p-4 ${isDark ? 'border-slate-700/20' : 'border-slate-200'}`}>
+              <h3 className="text-lg font-bold">Communities</h3>
+              <p className="mt-1 text-xs text-slate-400">Create or explore communities and their subgroup chats.</p>
+            </div>
+            <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-slate-400">
+              Choose a community in the workspace.
             </div>
           </div>
         )}

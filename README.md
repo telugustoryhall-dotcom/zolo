@@ -49,4 +49,11 @@ After deployment, validate with two separate accounts and devices: enable notifi
 - If `public.ad_campaigns` is missing from Supabase, the app temporarily uses its server-local SQLite Ads tables and logs a warning instead of returning 500 errors. This fallback is per-server-instance and is not shared across replicas. Apply the ZOLO Ads SQL section in Supabase before relying on campaigns across deployments; local fallback campaigns are not automatically copied into Supabase.
 - Ad images are validated as JPG, PNG, GIF, or WebP uploads. Only HTTPS public destinations are accepted. Each status-viewing session inserts one approved sponsored campaign after every five organic stories; an impression is recorded only after the ad remains visible for one second.
 
+## Communities and API connectivity
+
+- Communities use authenticated server routes and the existing group conversation tables for subgroup chats. Apply the **Communities** section in `supabase_schema.sql` before using them with Supabase; the client cannot access these tables directly.
+- Communities support public discovery/joining, private invitation links with admin approval, owner/moderator announcements, and subgroup chats. Invite links expire after seven days.
+- The default API URL is same-origin, which is correct for the included Render deployment. If the frontend is hosted separately, set `VITE_API_BASE_URL` to the backend origin when building the frontend and set `CORS_ORIGIN` on the backend to the exact frontend origin(s). For example: `VITE_API_BASE_URL=https://api.example.com` and `CORS_ORIGIN=https://chat.example.com`.
+- Ads campaign reads retry transient network failures. If the backend still cannot be reached, the Ads dashboard shows the API origin and a retry action; verify that the frontend API URL and backend deployment are reachable.
+
 Run `npm test`, `npm run lint`, and `npm run build` to validate the application.

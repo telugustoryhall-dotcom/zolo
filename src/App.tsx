@@ -15,6 +15,7 @@ import { StatusViewerModal } from './components/StatusViewerModal';
 import { StatusCreatorModal } from './components/StatusCreatorModal';
 import { ImageMediaViewer } from './components/ImageMediaViewer';
 import { ZoloAdsModal } from './components/ZoloAdsModal';
+import { CommunitiesPanel } from './components/CommunitiesPanel';
 import type { AdvertisementCampaign } from './types/ads';
 import { createStatusViewingSequence } from './utils/statusAds';
 import { NewChatModal } from './components/NewChatModal';
@@ -486,12 +487,18 @@ export default function App() {
   }, [authUser, activeSidebarTab]);
 
   const handleSidebarTabChange = (tab: SidebarTabType) => {
+    if (tab === 'communities') {
+      activeContactIdRef.current = null;
+      setActiveContactId(null);
+      setIsContactInfoOpen(false);
+    }
     setActiveSidebarTab(tab);
     const currentState = window.history.state as ZoloHistoryState | null;
+    const nextContactId = tab === 'communities' ? null : activeContactIdRef.current;
     if (
       currentState?.zoloAppNavigation &&
       currentState.zoloTab === tab &&
-      (currentState.zoloChatId || null) === activeContactIdRef.current
+      (currentState.zoloChatId || null) === nextContactId
     ) {
       return;
     }
@@ -500,7 +507,7 @@ export default function App() {
         ...(currentState && typeof currentState === 'object' ? currentState : {}),
         zoloAppNavigation: true,
         zoloTab: tab,
-        zoloChatId: activeContactIdRef.current,
+        zoloChatId: nextContactId,
       },
       '',
       window.location.href
@@ -1839,6 +1846,29 @@ export default function App() {
     }
   };
 
+  const handleOpenCommunityGroup = (group: GroupConversationWireDto) => {
+    const groupContact = mapGroupToContact(group, contactsRef.current);
+    const nextContacts = [
+      groupContact,
+      ...contactsRef.current.filter((contact) => contact.id !== group.id),
+    ];
+    contactsRef.current = nextContacts;
+    setContacts(nextContacts);
+    activeContactIdRef.current = group.id;
+    setActiveContactId(group.id);
+    setActiveSidebarTab('chats');
+    setIsContactInfoOpen(false);
+    window.history.pushState(
+      {
+        zoloAppNavigation: true,
+        zoloTab: 'chats',
+        zoloChatId: group.id,
+      },
+      '',
+      window.location.href
+    );
+  };
+
   // Forward typing status over WebSocket when chatting with a real ZOLO contact
   const handleTypingChange = useCallback((isTypingNow: boolean) => {
     const activeId = activeContactIdRef.current;
@@ -2490,7 +2520,7 @@ export default function App() {
           }`}
         >
           {/* Sidebar Area */}
-          <div className={`h-full ${activeContactId ? 'hidden md:flex' : 'flex w-full'}`}>
+          <div className={`h-full ${activeContactId || activeSidebarTab === 'communities' ? 'hidden md:flex' : 'flex w-full'}`}>
             <Sidebar
               contacts={contacts}
               activeContactId={activeContactId}
@@ -2579,7 +2609,16 @@ export default function App() {
           </div>
 
           {/* Active Chat Conversation Area */}
-          {activeContact ? (
+          {activeSidebarTab === 'communities' ? (
+            <div className="flex h-full min-w-0 flex-1 overflow-hidden">
+              <CommunitiesPanel
+                theme={userProfile.theme}
+                activeTab={activeSidebarTab}
+                onNavigateTab={handleSidebarTabChange}
+                onOpenGroup={handleOpenCommunityGroup}
+              />
+            </div>
+          ) : activeContact ? (
             <div className={`flex-1 h-full flex overflow-hidden ${!activeContactId ? 'hidden md:flex' : 'flex'}`}>
               <ChatArea
                 contact={activeContact}

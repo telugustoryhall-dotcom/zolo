@@ -43,6 +43,7 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTab, setAdminTab] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [campaignLoadFailed, setCampaignLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -58,6 +59,7 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
 
   const refresh = async () => {
     setIsLoading(true);
+    setCampaignLoadFailed(false);
     setError('');
     try {
       const { campaigns: ownCampaigns } = await authApi.listAdCampaigns();
@@ -72,6 +74,7 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
         setIsAdmin(false);
       }
     } catch (fetchError) {
+      setCampaignLoadFailed(true);
       setError(getErrorMessage(fetchError));
     } finally {
       setIsLoading(false);
@@ -339,7 +342,21 @@ export const ZoloAdsModal: React.FC<ZoloAdsModalProps> = ({ advertiserName, onCl
           {isAdmin && <button type="button" onClick={() => setAdminTab(true)} className={`rounded-t-lg px-3 py-2 text-xs ${adminTab ? 'bg-white/10 text-emerald-300' : 'text-slate-400'}`}>Moderation ({reports.length})</button>}
         </div>
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {error && <div role="alert" className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">{error}</div>}
+          {error && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
+              <span>{error}</span>
+              {campaignLoadFailed && (
+                <button
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => void refresh()}
+                  className="min-h-10 rounded-md border border-rose-300/30 px-3 font-semibold hover:bg-rose-500/10 disabled:opacity-50"
+                >
+                  {isLoading ? 'Retrying…' : 'Retry loading ads'}
+                </button>
+              )}
+            </div>
+          )}
           {notice && <div role="status" className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">{notice}</div>}
 
           {!adminTab && !isFormOpen && (

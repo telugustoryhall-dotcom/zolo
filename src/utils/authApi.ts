@@ -15,10 +15,32 @@ import type {
 } from '../types/auth';
 import type { ChatCategory } from '../types/chat';
 import type { AdCreativeInput, AdStatus, AdvertisementCampaign } from '../types/ads';
+import type {
+  CommunityAnnouncement,
+  CommunityDetail,
+  CommunityDirectory,
+  CommunityInvitePreview,
+} from '../types/communities';
 
 const SESSION_FALLBACK_KEY = 'zolo_active_session_token';
+const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL?.trim()) || '';
 
 let inMemorySessionToken: string | null = null;
+
+function resolveApiUrl(url: string): string {
+  if (!API_BASE_URL || !url.startsWith('/api/')) return url;
+  return `${API_BASE_URL.replace(/\/+$/, '')}${url}`;
+}
+
+function getApiOrigin(url: string): string {
+  try {
+    const base = typeof window === 'undefined' ? 'http://localhost' : window.location.href;
+    return new URL(url, base).origin;
+  } catch {
+    return 'the configured ZOLO API';
+  }
+}
 
 export function getClientSessionToken(): string | null {
   if (inMemorySessionToken) return inMemorySessionToken;
@@ -66,6 +88,8 @@ export class AuthApiClientError extends Error {
 async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers || {});
   const fallbackToken = getClientSessionToken();
+  const requestUrl = resolveApiUrl(url);
+  const method = (init.method || 'GET').toUpperCase();
   if (fallbackToken && !headers.has('x-session-token')) {
     headers.set('x-session-token', fallbackToken);
   }
@@ -75,16 +99,26 @@ async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(url, {
-      ...init,
-      headers,
-      credentials: 'include',
-    });
+    const maxAttempts = method === 'GET' || method === 'HEAD' ? 3 : 1;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        response = await fetch(requestUrl, {
+          ...init,
+          headers,
+          credentials: 'include',
+        });
+        break;
+      } catch (error) {
+        const aborted = error instanceof Error && error.name === 'AbortError';
+        if (aborted || attempt + 1 >= maxAttempts) throw error;
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
   } catch {
     throw new AuthApiClientError({
       status: 0,
       code: 'NETWORK_ERROR',
-      error: 'Network connection error. Please check your internet connection and try again.',
+      error: `Cannot reach the ZOLO API at ${getApiOrigin(requestUrl)}. Check the API server address, server availability, and network connection, then retry.`,
     });
   }
 
@@ -288,6 +322,99 @@ export const authApi = {
     return apiFetch('/api/groups', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+
+  async fetchCommunities(): Promise<CommunityDirectory> {
+    return apiFetch('/api/communities');
+  },
+
+  async fetchCommunity(communityId: string): Promise<{ detail: CommunityDetail }> {
+    return apiFetch(`/api/communities/${encodeURIComponent(communityId)}`);
+  },
+
+  async createCommunity(params: {
+    name: string;
+    description: string;
+    category: string;
+    imageUrl?: string | null;
+    privacy: 'public' | 'private';
+  }): Promise<{ community: CommunityDirectory['mine'][number] }> {
+    return apiFetch('/api/communities', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async joinCommunity(communityId: string): Promise<{ status: 'joined' | 'requested' | 'already_joined' }> {
+    return apiFetch(`/api/communities/${encodeURIComponent(communityId)}/join`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  async leaveCommunity(communityId: string): Promise<{ success: boolean }> {
+    return apiFetch(`/api/communities/${encodeURIComponent(communityId)}/membership`, {
+      method: 'DELETE',
+    });
+  },
+
+  async createCommunityGroup(
+    communityId: string,
+    params: { name: string; description: string }
+  ): Promise<{ group: GroupConversationWireDto }> {
+    return apiFetch(`/api/communities/${encodeURIComponent(communityId)}/groups`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async publishCommunityAnnouncement(
+    communityId: string,
+    body: string
+  ): Promise<{ announcement: CommunityAnnouncement }> {
+    return apiFetch(`/api/communities/${encodeURIComponent(communityId)}/announcements`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  },
+
+  async reviewCommunityJoinRequest(
+    communityId: string,
+    requesterPhone: string,
+    action: 'approve' | 'reject'
+  ): Promise<{ success: boolean }> {
+    return apiFetch(
+      `/api/communities/${encodeURIComponent(communityId)}/join-requests/${encodeURIComponent(requesterPhone)}/review`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      }
+    );
+  },
+
+  async createCommunityInvite(communityId: string): Promise<{ token: string; expiresAt: string }> {
+    return apiFetch(`/api/communities/${encodeURIComponent(communityId)}/invites`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  async fetchCommunityInvite(token: string): Promise<{ preview: CommunityInvitePreview }> {
+    return apiFetch(`/api/community-invites/${encodeURIComponent(token)}`);
+  },
+
+  async acceptCommunityInvite(token: string): Promise<{ communityId: string }> {
+    return apiFetch(`/api/community-invites/${encodeURIComponent(token)}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  async requestCommunityInvite(token: string): Promise<{ status: 'joined' | 'requested' | 'already_joined' }> {
+    return apiFetch(`/api/community-invites/${encodeURIComponent(token)}/request`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
   },
 
@@ -697,15 +824,10 @@ export const authApi = {
   async uploadAdImage(file: File): Promise<{ url: string; mimeType: string; byteSize: number }> {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch('/api/upload/ad-image', {
+    return apiFetch('/api/upload/ad-image', {
       method: 'POST',
       body: formData,
-      credentials: 'include',
-      headers: getClientSessionToken() ? { 'x-session-token': getClientSessionToken()! } : {},
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'Ad image upload failed.');
-    return body as { url: string; mimeType: string; byteSize: number };
   },
 
   async listAdCampaigns(): Promise<{ campaigns: AdvertisementCampaign[] }> {

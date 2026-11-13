@@ -762,6 +762,89 @@ CREATE TABLE IF NOT EXISTS public.ad_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_ad_reports_campaign ON public.ad_reports(campaign_id, created_at DESC);
 
+-- ============================================================================
+-- 18. COMMUNITIES, MEMBERSHIP, SUBGROUPS, ANNOUNCEMENTS, AND JOIN REQUESTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.communities (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL CHECK (char_length(name) BETWEEN 2 AND 80),
+  description TEXT NOT NULL DEFAULT '',
+  image_url TEXT,
+  category TEXT NOT NULL DEFAULT 'General',
+  privacy TEXT NOT NULL CHECK (privacy IN ('public', 'private')),
+  created_by TEXT NOT NULL REFERENCES public.users(phone_normalized) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_communities_discovery
+  ON public.communities(privacy, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_communities_creator
+  ON public.communities(created_by, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.community_members (
+  community_id UUID NOT NULL REFERENCES public.communities(id) ON DELETE CASCADE,
+  member_phone TEXT NOT NULL REFERENCES public.users(phone_normalized) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member'
+    CHECK (role IN ('owner', 'admin', 'moderator', 'member')),
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (community_id, member_phone)
+);
+CREATE INDEX IF NOT EXISTS idx_community_members_phone
+  ON public.community_members(member_phone, joined_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.community_groups (
+  community_id UUID NOT NULL REFERENCES public.communities(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL UNIQUE REFERENCES public.conversations(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (community_id, conversation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_community_groups_community
+  ON public.community_groups(community_id, created_at);
+
+CREATE TABLE IF NOT EXISTS public.community_announcements (
+  id UUID PRIMARY KEY,
+  community_id UUID NOT NULL REFERENCES public.communities(id) ON DELETE CASCADE,
+  author_phone TEXT NOT NULL REFERENCES public.users(phone_normalized) ON DELETE CASCADE,
+  author_name TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 3000),
+  pinned BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_community_announcements_feed
+  ON public.community_announcements(community_id, pinned DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.community_join_requests (
+  community_id UUID NOT NULL REFERENCES public.communities(id) ON DELETE CASCADE,
+  requester_phone TEXT NOT NULL REFERENCES public.users(phone_normalized) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by TEXT REFERENCES public.users(phone_normalized) ON DELETE SET NULL,
+  PRIMARY KEY (community_id, requester_phone)
+);
+CREATE INDEX IF NOT EXISTS idx_community_join_requests_pending
+  ON public.community_join_requests(community_id, status, requested_at);
+
+CREATE TABLE IF NOT EXISTS public.community_invites (
+  id UUID PRIMARY KEY,
+  community_id UUID NOT NULL REFERENCES public.communities(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL REFERENCES public.users(phone_normalized) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_community_invites_community
+  ON public.community_invites(community_id, expires_at);
+
+ALTER TABLE public.communities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.community_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.community_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.community_announcements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.community_join_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.community_invites ENABLE ROW LEVEL SECURITY;
+
 ALTER TABLE public.ad_campaigns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ad_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ad_reports ENABLE ROW LEVEL SECURITY;
@@ -802,9 +885,36 @@ REVOKE ALL PRIVILEGES ON TABLE
   public.ad_campaigns,
   public.ad_visit_verifications,
   public.ad_events,
-  public.ad_reports
+  public.ad_reports,
+  public.communities,
+  public.community_members,
+  public.community_groups,
+  public.community_announcements,
+  public.community_join_requests,
+  public.community_invites
 FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+  public.communities,
+  public.community_members,
+  public.community_groups,
+  public.community_announcements,
+  public.community_join_requests,
+  public.community_invites
+TO service_role;
 REVOKE ALL PRIVILEGES ON TABLE storage.objects FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE storage.objects TO anon, authenticated;
+
+ALTER TABLE public.community_announcements REPLICA IDENTITY FULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'community_announcements'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.community_announcements;
+  END IF;
+END $$;
 
 NOTIFY pgrst, 'reload schema';

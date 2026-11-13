@@ -44,6 +44,20 @@ import {
   saveGroupMessage,
 } from '../db/groupRepository.ts';
 import {
+  acceptCommunityInvite,
+  createCommunity,
+  createCommunityGroup,
+  createCommunityInvite,
+  getCommunityInvitePreview,
+  getCommunityDetail,
+  leaveCommunity,
+  listCommunitiesForUser,
+  publishCommunityAnnouncement,
+  requestCommunityInvite,
+  requestToJoinCommunity,
+  reviewCommunityJoinRequest,
+} from '../db/communityRepository.ts';
+import {
   createStatusStoryInDb,
   fetchUserCallHistory,
   fetchVisibleStatusStories,
@@ -1421,6 +1435,270 @@ export function createApp(options: CreateAppOptions = {}) {
       }
     }
   );
+
+  app.get('/api/community-invites/:token', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const preview = await getCommunityInvitePreview(
+        String(req.params.token),
+        req.authUser!.phoneNormalized
+      );
+      if (!preview) {
+        res.status(404).json({ code: 'COMMUNITY_INVITE_NOT_FOUND', error: 'This invitation is invalid, revoked, or expired.' });
+        return;
+      }
+      res.json({ preview });
+    } catch (error) {
+      console.error('Error in GET /api/community-invites/:token:', error);
+      res.status(503).json({
+        code: 'COMMUNITY_INVITE_LOAD_FAILED',
+        error: error instanceof Error ? error.message : 'Could not load this invitation.',
+      });
+    }
+  });
+
+  app.post('/api/community-invites/:token/accept', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const communityId = await acceptCommunityInvite(
+        String(req.params.token),
+        req.authUser!.phoneNormalized
+      );
+      res.json({ communityId });
+    } catch (error) {
+      console.error('Error in POST /api/community-invites/:token/accept:', error);
+      res.status(400).json({
+        code: 'COMMUNITY_INVITE_ACCEPT_FAILED',
+        error: error instanceof Error ? error.message : 'Could not accept this invitation.',
+      });
+    }
+  });
+
+  app.post('/api/community-invites/:token/request', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const status = await requestCommunityInvite(
+        String(req.params.token),
+        req.authUser!.phoneNormalized
+      );
+      res.status(status === 'requested' ? 202 : 200).json({ status });
+    } catch (error) {
+      console.error('Error in POST /api/community-invites/:token/request:', error);
+      res.status(400).json({
+        code: 'COMMUNITY_INVITE_REQUEST_FAILED',
+        error: error instanceof Error ? error.message : 'Could not request to join this community.',
+      });
+    }
+  });
+
+  app.get('/api/communities', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      res.json(await listCommunitiesForUser(req.authUser!.phoneNormalized));
+    } catch (error) {
+      console.error('Error in GET /api/communities:', error);
+      res.status(503).json({
+        code: 'COMMUNITIES_LOAD_FAILED',
+        error: error instanceof Error ? error.message : 'Could not load communities.',
+      });
+    }
+  });
+
+  app.post('/api/communities', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { name, description = '', category = 'General', imageUrl = null, privacy = 'public' } = req.body as {
+        name?: unknown;
+        description?: unknown;
+        category?: unknown;
+        imageUrl?: unknown;
+        privacy?: unknown;
+      };
+      const safeName = typeof name === 'string' ? name.trim() : '';
+      const safeDescription = typeof description === 'string' ? description.trim() : '';
+      const safeCategory = typeof category === 'string' ? category.trim() : '';
+      if (safeName.length < 2 || safeName.length > 80) {
+        res.status(400).json({ code: 'INVALID_COMMUNITY_NAME', error: 'Community name must be between 2 and 80 characters.' });
+        return;
+      }
+      if (safeDescription.length > 1000 || safeCategory.length > 60) {
+        res.status(400).json({ code: 'INVALID_COMMUNITY_DETAILS', error: 'Description or category is too long.' });
+        return;
+      }
+      if (privacy !== 'public' && privacy !== 'private') {
+        res.status(400).json({ code: 'INVALID_COMMUNITY_PRIVACY', error: 'Choose public or private visibility.' });
+        return;
+      }
+      if (imageUrl !== null && (typeof imageUrl !== 'string' || imageUrl.length > 2048)) {
+        res.status(400).json({ code: 'INVALID_COMMUNITY_IMAGE', error: 'Community image URL is invalid.' });
+        return;
+      }
+      const community = await createCommunity({
+        name: safeName,
+        description: safeDescription,
+        category: safeCategory || 'General',
+        imageUrl: typeof imageUrl === 'string' ? imageUrl : null,
+        privacy,
+        createdBy: req.authUser!.phoneNormalized,
+      });
+      res.status(201).json({ community });
+    } catch (error) {
+      console.error('Error in POST /api/communities:', error);
+      res.status(503).json({
+        code: 'COMMUNITY_CREATE_FAILED',
+        error: error instanceof Error ? error.message : 'Could not create the community.',
+      });
+    }
+  });
+
+  app.get('/api/communities/:communityId', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const detail = await getCommunityDetail(
+        String(req.params.communityId),
+        req.authUser!.phoneNormalized
+      );
+      if (!detail) {
+        res.status(404).json({ code: 'COMMUNITY_NOT_FOUND', error: 'Community not found.' });
+        return;
+      }
+      res.json({ detail });
+    } catch (error) {
+      console.error('Error in GET /api/communities/:communityId:', error);
+      res.status(503).json({
+        code: 'COMMUNITY_DETAIL_FAILED',
+        error: error instanceof Error ? error.message : 'Could not load the community.',
+      });
+    }
+  });
+
+  app.post('/api/communities/:communityId/join', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const result = await requestToJoinCommunity(
+        String(req.params.communityId),
+        req.authUser!.phoneNormalized
+      );
+      res.status(result === 'requested' ? 202 : 200).json({ status: result });
+    } catch (error) {
+      console.error('Error in POST /api/communities/:communityId/join:', error);
+      res.status(400).json({
+        code: 'COMMUNITY_JOIN_FAILED',
+        error: error instanceof Error ? error.message : 'Could not join the community.',
+      });
+    }
+  });
+
+  app.delete('/api/communities/:communityId/membership', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await leaveCommunity(String(req.params.communityId), req.authUser!.phoneNormalized);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error in DELETE /api/communities/:communityId/membership:', error);
+      res.status(400).json({
+        code: 'COMMUNITY_LEAVE_FAILED',
+        error: error instanceof Error ? error.message : 'Could not leave the community.',
+      });
+    }
+  });
+
+  app.post('/api/communities/:communityId/groups', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { name, description = '' } = req.body as { name?: unknown; description?: unknown };
+      const safeName = typeof name === 'string' ? name.trim() : '';
+      const safeDescription = typeof description === 'string' ? description.trim() : '';
+      if (safeName.length < 2 || safeName.length > 80 || safeDescription.length > 500) {
+        res.status(400).json({ code: 'INVALID_COMMUNITY_GROUP', error: 'Subgroup name must be 2–80 characters and description 500 characters or fewer.' });
+        return;
+      }
+      const group = await createCommunityGroup({
+        communityId: String(req.params.communityId),
+        name: safeName,
+        description: safeDescription,
+        createdBy: req.authUser!.phoneNormalized,
+      });
+      realtimeHub.sendToPhones(group.memberPhones, { type: 'group:created', group });
+      void Promise.all(group.memberPhones
+        .filter((memberPhone) => memberPhone !== req.authUser!.phoneNormalized)
+        .map((memberPhone) => sendPushNotification(memberPhone, 'otherActivity', {
+          eventId: `community-group:${group.id}`,
+          type: 'group-invitation',
+          title: 'New community subgroup',
+          body: `You were added to ${group.name}`,
+          conversationId: group.id,
+          groupId: group.id,
+        }).catch((error) => {
+          console.error('Community subgroup notification failed:', {
+            code: error instanceof Error ? error.name : 'unknown',
+          });
+        })));
+      res.status(201).json({ group });
+    } catch (error) {
+      console.error('Error in POST /api/communities/:communityId/groups:', error);
+      res.status(400).json({
+        code: 'COMMUNITY_GROUP_CREATE_FAILED',
+        error: error instanceof Error ? error.message : 'Could not create the subgroup.',
+      });
+    }
+  });
+
+  app.post('/api/communities/:communityId/invites', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const invite = await createCommunityInvite(
+        String(req.params.communityId),
+        req.authUser!.phoneNormalized
+      );
+      res.status(201).json(invite);
+    } catch (error) {
+      console.error('Error in POST /api/communities/:communityId/invites:', error);
+      const message = error instanceof Error ? error.message : 'Could not create an invitation.';
+      res.status(message.includes('permission') ? 403 : 400).json({
+        code: 'COMMUNITY_INVITE_CREATE_FAILED',
+        error: message,
+      });
+    }
+  });
+
+  app.post('/api/communities/:communityId/announcements', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!body || body.length > 3000) {
+        res.status(400).json({ code: 'INVALID_COMMUNITY_ANNOUNCEMENT', error: 'Announcement must be between 1 and 3000 characters.' });
+        return;
+      }
+      const announcement = await publishCommunityAnnouncement({
+        communityId: String(req.params.communityId),
+        authorPhone: req.authUser!.phoneNormalized,
+        authorName: req.authUser!.fullName,
+        body,
+      });
+      res.status(201).json({ announcement });
+    } catch (error) {
+      console.error('Error in POST /api/communities/:communityId/announcements:', error);
+      const message = error instanceof Error ? error.message : 'Could not publish the announcement.';
+      res.status(message.includes('permission') ? 403 : 400).json({
+        code: 'COMMUNITY_ANNOUNCEMENT_FAILED',
+        error: message,
+      });
+    }
+  });
+
+  app.post('/api/communities/:communityId/join-requests/:requesterPhone/review', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const action = req.body?.action;
+      if (action !== 'approve' && action !== 'reject') {
+        res.status(400).json({ code: 'INVALID_JOIN_REQUEST_ACTION', error: 'Choose approve or reject.' });
+        return;
+      }
+      await reviewCommunityJoinRequest({
+        communityId: String(req.params.communityId),
+        requesterPhone: String(req.params.requesterPhone),
+        reviewerPhone: req.authUser!.phoneNormalized,
+        approve: action === 'approve',
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error in POST /api/communities/:communityId/join-requests/:requesterPhone/review:', error);
+      const message = error instanceof Error ? error.message : 'Could not review the join request.';
+      res.status(message.includes('permission') ? 403 : 400).json({
+        code: 'COMMUNITY_JOIN_REQUEST_REVIEW_FAILED',
+        error: message,
+      });
+    }
+  });
 
   app.post('/api/groups', requireSessionAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {

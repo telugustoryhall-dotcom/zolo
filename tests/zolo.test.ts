@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server/app.ts';
 import {
@@ -47,6 +47,7 @@ import {
 import { parseMessageLinks } from '../src/utils/messageLinks.ts';
 import { extractLinkMetadata, fetchSafeLinkPreview } from '../src/server/linkPreview.ts';
 import { createStatusViewingSequence } from '../src/utils/statusAds.ts';
+import { authApi, AuthApiClientError } from '../src/utils/authApi.ts';
 import type { StatusStory } from '../src/types/chat.ts';
 import type { AdvertisementCampaign } from '../src/types/ads.ts';
 import {
@@ -75,6 +76,50 @@ describe('Message links and preview safety', () => {
       startedAt + 16_000
     )).toBe('consumed');
     expect(getAdVisitVerificationStatus(row, startedAt + 30 * 60_000)).toBe('expired');
+  });
+
+  describe('API connectivity and Communities access', () => {
+    it('retries transient network failures for safe Ads reads', async () => {
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new TypeError('temporary network failure'))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ campaigns: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await expect(authApi.listAdCampaigns()).resolves.toEqual({ campaigns: [] });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('returns an actionable API-origin error after network retries fail', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await expect(authApi.listAdCampaigns()).rejects.toMatchObject({
+          code: 'NETWORK_ERROR',
+          status: 0,
+        } satisfies Partial<AuthApiClientError>);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('requires an authenticated session for all Community endpoints', async () => {
+      const app = createApp();
+      const results = await Promise.all([
+        request(app).get('/api/communities'),
+        request(app).post('/api/communities').send({ name: 'Test community' }),
+        request(app).get('/api/communities/00000000-0000-4000-8000-000000000001'),
+        request(app).post('/api/communities/00000000-0000-4000-8000-000000000001/join'),
+        request(app).post(`/api/community-invites/${'a'.repeat(64)}/request`),
+      ]);
+      expect(results.map((result) => result.status)).toEqual([401, 401, 401, 401, 401]);
+    });
   });
 
   it('prefers Open Graph and Twitter metadata with safe title fallbacks', () => {

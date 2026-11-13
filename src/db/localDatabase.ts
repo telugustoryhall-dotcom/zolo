@@ -339,6 +339,73 @@ export function getLocalDb(): DatabaseSync {
         created_at TEXT NOT NULL,
         UNIQUE(campaign_id, reporter_key)
       );
+
+      CREATE TABLE IF NOT EXISTS local_communities (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        image_url TEXT,
+        category TEXT NOT NULL DEFAULT 'General',
+        privacy TEXT NOT NULL CHECK (privacy IN ('public', 'private')),
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_communities_public
+        ON local_communities(privacy, created_at);
+
+      CREATE TABLE IF NOT EXISTS local_community_members (
+        community_id TEXT NOT NULL REFERENCES local_communities(id) ON DELETE CASCADE,
+        member_phone TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'moderator', 'member')),
+        joined_at TEXT NOT NULL,
+        PRIMARY KEY (community_id, member_phone)
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_community_members_phone
+        ON local_community_members(member_phone);
+
+      CREATE TABLE IF NOT EXISTS local_community_groups (
+        community_id TEXT NOT NULL REFERENCES local_communities(id) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL UNIQUE REFERENCES local_conversations(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (community_id, conversation_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS local_community_announcements (
+        id TEXT PRIMARY KEY,
+        community_id TEXT NOT NULL REFERENCES local_communities(id) ON DELETE CASCADE,
+        author_phone TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        body TEXT NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_community_announcements_feed
+        ON local_community_announcements(community_id, pinned, created_at);
+
+      CREATE TABLE IF NOT EXISTS local_community_join_requests (
+        community_id TEXT NOT NULL REFERENCES local_communities(id) ON DELETE CASCADE,
+        requester_phone TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+        requested_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        reviewed_by TEXT,
+        PRIMARY KEY (community_id, requester_phone)
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_community_join_requests_pending
+        ON local_community_join_requests(community_id, status, requested_at);
+
+      CREATE TABLE IF NOT EXISTS local_community_invites (
+        id TEXT PRIMARY KEY,
+        community_id TEXT NOT NULL REFERENCES local_communities(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_community_invites_community
+        ON local_community_invites(community_id, expires_at);
     `);
 
     localDbInstance = db;
