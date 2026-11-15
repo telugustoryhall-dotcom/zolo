@@ -75,6 +75,8 @@ describe('ZOLO Backend API Health', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('application/javascript');
     expect(res.text).toContain('onBackgroundMessage');
+    expect(res.text).toContain("requestUrl.pathname.startsWith('/api/')");
+    expect(res.text).toContain('event.respondWith(fetch(event.request))');
     expect(res.text).toContain('notificationclick');
     expect(res.text).not.toContain('private_key');
   });

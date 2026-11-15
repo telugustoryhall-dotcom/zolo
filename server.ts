@@ -27,26 +27,27 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    const publicPath = path.resolve(__dirname, 'public');
 
-    if (fs.existsSync(publicPath)) {
-      app.use(express.static(publicPath, { maxAge: '7d' }));
+    if (!fs.existsSync(distPath)) {
+      throw new Error(`Production build directory not found: ${distPath}`);
     }
 
-    if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath, { index: false }));
-      app.get('*', (req: Request, res: Response) => {
-        if (req.path.startsWith('/api/')) {
-          res.status(404).json({ error: 'API endpoint not found.' });
-          return;
-        }
-        if (path.extname(req.path)) {
-          res.sendStatus(404);
-          return;
-        }
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
-    }
+    app.use(express.static(distPath, { index: false, maxAge: '7d' }));
+    app.get('*', (req: Request, res: Response) => {
+      if (req.path.startsWith('/api/')) {
+        res.status(404).json({ error: 'API endpoint not found.' });
+        return;
+      }
+      if (
+        path.extname(req.path) ||
+        req.path.startsWith('/icons/') ||
+        req.path.startsWith('/assets/')
+      ) {
+        res.sendStatus(404);
+        return;
+      }
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   httpServer.listen(port, '0.0.0.0', () => {

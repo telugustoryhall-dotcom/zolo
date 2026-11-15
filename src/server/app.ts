@@ -425,6 +425,18 @@ export function createApp(options: CreateAppOptions = {}) {
       importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
       firebase.initializeApp(${config});
       const messaging = firebase.messaging();
+      self.addEventListener('fetch', (event) => {
+        const requestUrl = new URL(event.request.url);
+        if (
+          event.request.method !== 'GET' ||
+          requestUrl.origin !== self.location.origin ||
+          requestUrl.pathname === '/api' ||
+          requestUrl.pathname.startsWith('/api/')
+        ) {
+          return;
+        }
+        event.respondWith(fetch(event.request));
+      });
       messaging.onBackgroundMessage(({ data = {} }) => {
         if (data.type === 'call-cancel') {
           return self.registration.getNotifications().then((notifications) => {
