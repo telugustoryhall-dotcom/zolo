@@ -23,6 +23,8 @@ View your app in AI Studio: https://ai.studio/apps/2082a314-4d97-411a-813d-6d0c8
 
 The web Firebase application is already configured in `firebase-applet-config.json` and is reused by the client and server. The web API key and app identifiers in that file are public Firebase client configuration; do not put Firebase Admin service-account keys there.
 
+Firebase Analytics initializes separately from the supplied `viplav-kampelly` web configuration. This keeps the existing Firebase Auth and Cloud Messaging project unchanged. Analytics starts only when the browser supports it; Firebase web app configuration is public and must not contain Admin credentials.
+
 To enable real push delivery:
 
 1. In Firebase Console, select the project matching the existing `projectId` in `firebase-applet-config.json` (or replace that file with the values for the intended project).
