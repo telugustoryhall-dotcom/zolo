@@ -40,6 +40,10 @@ async function startServer() {
           res.status(404).json({ error: 'API endpoint not found.' });
           return;
         }
+        if (path.extname(req.path)) {
+          res.sendStatus(404);
+          return;
+        }
         res.sendFile(path.join(distPath, 'index.html'));
       });
     }
